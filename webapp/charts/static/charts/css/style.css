@@ -1,0 +1,330 @@
+/* ===================================
+   Bitcoin Trading Dashboard Styles
+   Professional Dark Theme
+   =================================== */
+
+/* Reset and Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: #0f0f0f;
+    color: #e0e0e0;
+    line-height: 1.6;
+}
+
+.dashboard-container {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Header Styles */
+.header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    padding: 20px 30px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.header h1 {
+    font-size: 28px;
+    font-weight: 600;
+    color: #f5f5f5;
+}
+
+.latest-price {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 18px;
+}
+
+.price-label {
+    color: #9e9e9e;
+}
+
+.price-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: #4caf50;
+}
+
+.price-change {
+    font-size: 16px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.price-change.positive {
+    color: #4caf50;
+    background: rgba(76, 175, 80, 0.1);
+}
+
+.price-change.negative {
+    color: #f44336;
+    background: rgba(244, 67, 54, 0.1);
+}
+
+/* Controls Panel */
+.controls-panel {
+    background: #1a1a1a;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    display: flex;
+    gap: 30px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.control-group label {
+    font-weight: 500;
+    color: #bdbdbd;
+}
+
+.control-select {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #3a3a3a;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.control-select:hover {
+    border-color: #4a4a4a;
+}
+
+.control-select:focus {
+    outline: none;
+    border-color: #2196f3;
+}
+
+.indicator-toggles {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.toggle-label {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: color 0.2s;
+}
+
+.toggle-label:hover {
+    color: #f5f5f5;
+}
+
+.toggle-label input[type="checkbox"] {
+    cursor: pointer;
+}
+
+/* Buttons */
+.btn-primary,
+.btn-secondary {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-primary {
+    background: #2196f3;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #1976d2;
+}
+
+.btn-primary:active {
+    transform: translateY(1px);
+}
+
+.btn-secondary {
+    background: #424242;
+    color: #e0e0e0;
+}
+
+.btn-secondary:hover {
+    background: #525252;
+}
+
+.btn-secondary.active {
+    background: #4caf50;
+    color: white;
+}
+
+/* Chart Wrapper */
+.chart-wrapper {
+    background: #1a1a1a;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    position: relative;
+    min-height: 680px;
+}
+
+#chart-container {
+    height: 500px;
+    margin-bottom: 10px;
+}
+
+#volume-container {
+    height: 150px;
+}
+
+/* Loading Indicator */
+.loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 10;
+}
+
+.loading.hidden {
+    display: none;
+}
+
+.spinner {
+    border: 4px solid #2a2a2a;
+    border-top: 4px solid #2196f3;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 10px;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.loading p {
+    color: #9e9e9e;
+    font-size: 14px;
+}
+
+/* Chart Info */
+.chart-info {
+    background: #1a1a1a;
+    padding: 15px 20px;
+    border-radius: 8px;
+    display: flex;
+    gap: 30px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.info-item {
+    display: flex;
+    gap: 8px;
+}
+
+.info-label {
+    color: #9e9e9e;
+    font-weight: 500;
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+    .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .controls-panel {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    #chart-container {
+        height: 400px;
+    }
+
+    #volume-container {
+        height: 120px;
+    }
+}
+
+@media (max-width: 768px) {
+    .dashboard-container {
+        padding: 10px;
+    }
+
+    .header {
+        padding: 15px 20px;
+    }
+
+    .header h1 {
+        font-size: 22px;
+    }
+
+    .price-value {
+        font-size: 20px;
+    }
+
+    .controls-panel {
+        padding: 15px;
+    }
+
+    .indicator-toggles {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .chart-wrapper {
+        padding: 15px;
+        min-height: 550px;
+    }
+
+    #chart-container {
+        height: 350px;
+    }
+
+    #volume-container {
+        height: 100px;
+    }
+
+    .chart-info {
+        flex-direction: column;
+        gap: 10px;
+    }
+}

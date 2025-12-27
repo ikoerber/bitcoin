@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTC/EUR Trading Dashboard</title>
+
+    <!-- TradingView Lightweight Charts from CDN -->
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+    <!-- Custom CSS -->
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'charts/css/style.css' %}">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>BTC/EUR Trading Dashboard</h1>
+                <div class="latest-price" id="latest-price">
+                    <span class="price-label">Aktueller Preis:</span>
+                    <span class="price-value" id="price-value">Lädt...</span>
+                    <span class="price-change" id="price-change"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Controls Panel -->
+        <div class="controls-panel">
+            <div class="control-group">
+                <label for="timeframe-select">Zeitrahmen:</label>
+                <select id="timeframe-select" class="control-select">
+                    <option value="15m">15 Minuten</option>
+                    <option value="1h" selected>1 Stunde</option>
+                    <option value="4h">4 Stunden</option>
+                    <option value="1d">1 Tag</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Technische Indikatoren:</label>
+                <div class="indicator-toggles">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="rsi-toggle" data-indicator="rsi">
+                        RSI (14)
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="sma-toggle" data-indicator="sma">
+                        SMA (20)
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="ema-toggle" data-indicator="ema">
+                        EMA (20)
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="bb-toggle" data-indicator="bb">
+                        Bollinger Bands
+                    </label>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <button id="refresh-btn" class="btn-primary">Aktualisieren</button>
+                <button id="auto-refresh-toggle" class="btn-secondary">Auto-Refresh: AUS</button>
+            </div>
+        </div>
+
+        <!-- Chart Container -->
+        <div class="chart-wrapper">
+            <div id="loading-indicator" class="loading">
+                <div class="spinner"></div>
+                <p>Lade Chart-Daten...</p>
+            </div>
+            <div id="chart-container"></div>
+            <div id="volume-container"></div>
+        </div>
+
+        <!-- Chart Info -->
+        <div class="chart-info">
+            <div class="info-item">
+                <span class="info-label">Candles:</span>
+                <span id="candle-count">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Zeitraum:</span>
+                <span id="date-range">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Datenquelle:</span>
+                <span>Binance (BTC/EUR)</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom JavaScript -->
+    <script src="{% static 'charts/js/api.js' %}"></script>
+    <script src="{% static 'charts/js/indicators.js' %}"></script>
+    <script src="{% static 'charts/js/chart.js' %}"></script>
+</body>
+</html>

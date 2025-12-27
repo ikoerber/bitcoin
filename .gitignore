@@ -28,9 +28,10 @@ ENV/
 *.swo
 *~
 
-# Chart outputs
-charts/
+# Chart outputs (generated images, not the Django app)
+/charts/
 *.png
+!webapp/charts/
 
 # OS files
 .DS_Store

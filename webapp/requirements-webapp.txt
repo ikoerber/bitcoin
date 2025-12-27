@@ -1,0 +1,15 @@
+# Django Web Application Dependencies
+# Bitcoin Trading Data Visualization
+
+Django>=5.0.0
+djangorestframework>=3.14.0
+
+# Data analysis and technical indicators
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Exchange connectivity (reuse from parent project)
+ccxt>=4.0.0
+
+# CORS headers for development
+django-cors-headers>=4.3.0
