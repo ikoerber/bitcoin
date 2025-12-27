@@ -11,6 +11,9 @@ let volumeSeries = null;
 let volumeChart = null;
 let currentTimeframe = '1h';
 let autoRefreshInterval = null;
+let isLoadingMore = false;
+let allDataLoaded = false;
+let currentDataLength = 0;
 
 /**
  * Initialize TradingView charts (main + volume)
@@ -48,7 +51,8 @@ function initChart() {
     candlestickSeries = chart.addCandlestickSeries({
         upColor: '#26a69a',
         downColor: '#ef5350',
-        borderVisible: false,
+        borderUpColor: '#26a69a',
+        borderDownColor: '#ef5350',
         wickUpColor: '#26a69a',
         wickDownColor: '#ef5350',
     });
@@ -86,9 +90,14 @@ function initChart() {
 
     // Synchronize time scales
     chart.timeScale().subscribeVisibleTimeRangeChange(() => {
-        const timeRange = chart.timeScale().getVisibleRange();
-        if (timeRange) {
-            volumeChart.timeScale().setVisibleRange(timeRange);
+        try {
+            const timeRange = chart.timeScale().getVisibleRange();
+            if (timeRange && volumeChart && volumeChart.timeScale()) {
+                volumeChart.timeScale().setVisibleRange(timeRange);
+            }
+        } catch (error) {
+            // Ignore synchronization errors during initialization
+            console.debug('Time scale sync skipped:', error.message);
         }
     });
 
@@ -106,18 +115,35 @@ function initChart() {
  *
  * @param {string} timeframe - Timeframe to load ('15m', '1h', '4h', '1d')
  */
-async function loadChartData(timeframe) {
+async function loadChartData(timeframe, limit = 1000) {
     showLoading();
 
     try {
+        // Ensure charts are initialized
+        if (!chart || !candlestickSeries || !volumeSeries) {
+            console.error('Charts not initialized yet');
+            hideLoading();
+            return;
+        }
+
         // Fetch OHLCV data
-        const response = await API.fetchOHLCV(timeframe, 1000);
+        const response = await API.fetchOHLCV(timeframe, limit);
+
+        console.log('API Response:', response);
+        console.log('Data length:', response.data ? response.data.length : 0);
 
         if (!response.data || response.data.length === 0) {
+            console.error('No data received from API');
             alert('Keine Daten verfügbar für diesen Zeitrahmen');
             hideLoading();
             return;
         }
+
+        console.log('First candle:', response.data[0]);
+
+        // Track current data length
+        currentDataLength = response.data.length;
+        allDataLoaded = response.data.length < limit;
 
         // Update candlestick series
         candlestickSeries.setData(response.data);
@@ -137,15 +163,20 @@ async function loadChartData(timeframe) {
         await updateLatestPrice(timeframe);
 
         // Fit content to visible area
-        chart.timeScale().fitContent();
-        volumeChart.timeScale().fitContent();
+        try {
+            chart.timeScale().fitContent();
+            volumeChart.timeScale().fitContent();
+        } catch (error) {
+            console.warn('Could not fit content:', error.message);
+        }
 
         hideLoading();
         console.log(`Loaded ${response.count} candles for ${timeframe}`);
     } catch (error) {
         console.error('Error loading chart data:', error);
+        console.error('Error details:', error.message, error.stack);
         hideLoading();
-        alert('Fehler beim Laden der Chart-Daten. Bitte versuche es erneut.');
+        alert('Fehler beim Laden der Chart-Daten.\n\nDetails: ' + error.message + '\n\nBitte öffne die Browser-Konsole (F12) für weitere Informationen.');
     }
 }
 
@@ -186,7 +217,13 @@ async function updateLatestPrice(timeframe) {
  * @param {Object} response - API response with chart data
  */
 function updateChartInfo(response) {
-    document.getElementById('candle-count').textContent = response.count.toLocaleString('de-DE');
+    const countText = response.count.toLocaleString('de-DE');
+    const limitElement = document.getElementById('candle-limit');
+    const limit = parseInt(limitElement.value);
+
+    // Show if we hit the limit
+    const limitInfo = response.count >= limit ? ` (max ${limit})` : '';
+    document.getElementById('candle-count').textContent = countText + limitInfo;
 
     if (response.data.length > 0) {
         const firstTime = new Date(response.data[0].time * 1000);
@@ -218,7 +255,24 @@ function hideLoading() {
  */
 async function onTimeframeChange(timeframe) {
     currentTimeframe = timeframe;
-    await loadChartData(timeframe);
+    const limit = parseInt(document.getElementById('candle-limit').value);
+    await loadChartData(timeframe, limit);
+
+    // Reload active indicators
+    const indicators = getActiveIndicators();
+    for (const [indicator, checkbox] of Object.entries(indicators)) {
+        if (checkbox.checked) {
+            await toggleIndicator(indicator, true);
+        }
+    }
+}
+
+/**
+ * Handle candle limit change event
+ */
+async function onCandleLimitChange() {
+    const limit = parseInt(document.getElementById('candle-limit').value);
+    await loadChartData(currentTimeframe, limit);
 
     // Reload active indicators
     const indicators = getActiveIndicators();
@@ -311,6 +365,11 @@ function initEventListeners() {
         onTimeframeChange(e.target.value);
     });
 
+    // Candle limit selector
+    document.getElementById('candle-limit').addEventListener('change', () => {
+        onCandleLimitChange();
+    });
+
     // Indicator toggles
     const indicators = getActiveIndicators();
     for (const [indicator, checkbox] of Object.entries(indicators)) {
@@ -336,6 +395,49 @@ function initEventListeners() {
     document.getElementById('auto-refresh-toggle').addEventListener('click', () => {
         toggleAutoRefresh();
     });
+
+    // Database update button
+    document.getElementById('update-db-btn').addEventListener('click', async () => {
+        await updateDatabase();
+    });
+}
+
+/**
+ * Update database from Binance
+ */
+async function updateDatabase() {
+    const button = document.getElementById('update-db-btn');
+    const originalText = button.textContent;
+
+    if (confirm('Neue Daten von Binance laden?\n\nDies kann 1-2 Minuten dauern.')) {
+        try {
+            button.disabled = true;
+            button.textContent = '⏳ Lade Daten...';
+
+            const response = await fetch('/api/update-database/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                alert('✅ Datenbank erfolgreich aktualisiert!\n\nDie Seite wird neu geladen...');
+                location.reload();
+            } else {
+                console.error('Update failed:', data);
+                alert(`❌ Fehler beim Aktualisieren:\n\n${data.error || data.message}\n\nDetails in der Konsole (F12)`);
+            }
+        } catch (error) {
+            console.error('Error updating database:', error);
+            alert(`❌ Fehler beim Aktualisieren:\n\n${error.message}`);
+        } finally {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
 }
 
 /**
@@ -345,13 +447,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('Bitcoin Trading Dashboard initializing...');
 
     try {
+        console.log('Step 1: Initializing charts...');
         initChart();
+
+        console.log('Step 2: Initializing event listeners...');
         initEventListeners();
+
+        console.log('Step 3: Loading chart data for timeframe:', currentTimeframe);
         await loadChartData(currentTimeframe);
 
         console.log('Dashboard ready!');
     } catch (error) {
         console.error('Failed to initialize dashboard:', error);
-        alert('Fehler beim Initialisieren des Dashboards');
+        console.error('Error details:', error.message, error.stack);
+        alert('Fehler beim Initialisieren des Dashboards\n\nDetails: ' + error.message + '\n\nBitte öffne die Browser-Konsole (F12) für weitere Informationen.');
     }
 });

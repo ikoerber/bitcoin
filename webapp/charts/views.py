@@ -6,6 +6,7 @@ Provides:
 - REST API endpoints for OHLCV data, indicators, and price information
 """
 
+import re
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -21,6 +22,10 @@ from .serializers import (
     LatestPriceSerializer
 )
 from .indicators import TechnicalIndicators
+
+# Security: Maximum limit for data queries to prevent DoS
+MAX_QUERY_LIMIT = 10000
+DEFAULT_LIMIT = 500
 
 
 # ==================== FRONTEND VIEW ====================
@@ -62,10 +67,37 @@ class OHLCVDataView(APIView):
         except ValueError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Query parameters
-        limit = int(request.GET.get('limit', 500))
+        # Query parameters with validation
+        try:
+            limit = int(request.GET.get('limit', DEFAULT_LIMIT))
+            if limit <= 0:
+                return Response(
+                    {'error': 'Limit must be a positive integer'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            # Enforce maximum limit for security
+            limit = min(limit, MAX_QUERY_LIMIT)
+        except ValueError:
+            return Response(
+                {'error': 'Invalid limit parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         start_date = request.GET.get('start')  # YYYY-MM-DD format
         end_date = request.GET.get('end')      # YYYY-MM-DD format
+
+        # Validate date formats (YYYY-MM-DD)
+        date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+        if start_date and not date_pattern.match(start_date):
+            return Response(
+                {'error': 'Invalid start_date format. Use YYYY-MM-DD.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if end_date and not date_pattern.match(end_date):
+            return Response(
+                {'error': 'Invalid end_date format. Use YYYY-MM-DD.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Build query
         queryset = model.objects.all()
@@ -75,11 +107,15 @@ class OHLCVDataView(APIView):
         if end_date:
             queryset = queryset.filter(datum__lte=end_date)
 
-        # Order by timestamp and limit
-        queryset = queryset.order_by('timestamp')[:limit]
+        # Order by timestamp DESCENDING to get latest data, then limit
+        queryset = queryset.order_by('-timestamp')[:limit]
+
+        # Convert to list and reverse to get chronological order for chart
+        data_list = list(queryset)
+        data_list.reverse()
 
         # Serialize
-        serializer = OHLCVSerializer(queryset, many=True)
+        serializer = OHLCVSerializer(data_list, many=True)
 
         return Response({
             'timeframe': timeframe,
@@ -159,47 +195,85 @@ class IndicatorsView(APIView):
         except ValueError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Query parameters
+        # Query parameters with validation
         indicator_type = request.GET.get('indicator', 'rsi').lower()
-        period = int(request.GET.get('period', 14 if indicator_type == 'rsi' else 20))
-        limit = int(request.GET.get('limit', 500))
 
-        # Fetch OHLCV data
-        queryset = model.objects.order_by('timestamp')[:limit]
+        # Validate indicator type
+        valid_indicators = ['rsi', 'sma', 'ema', 'bb']
+        if indicator_type not in valid_indicators:
+            return Response(
+                {'error': f'Invalid indicator. Must be one of: {", ".join(valid_indicators)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        if not queryset:
+        # Validate period
+        try:
+            period = int(request.GET.get('period', 14 if indicator_type == 'rsi' else 20))
+            if period <= 0 or period > 200:
+                return Response(
+                    {'error': 'Period must be between 1 and 200'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except ValueError:
+            return Response(
+                {'error': 'Invalid period parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate limit
+        try:
+            limit = int(request.GET.get('limit', DEFAULT_LIMIT))
+            if limit <= 0:
+                return Response(
+                    {'error': 'Limit must be a positive integer'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            # Enforce maximum limit for security
+            limit = min(limit, MAX_QUERY_LIMIT)
+        except ValueError:
+            return Response(
+                {'error': 'Invalid limit parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Fetch OHLCV data - get latest data by ordering descending
+        queryset = model.objects.order_by('-timestamp')[:limit]
+
+        if not queryset.exists():
             return Response(
                 {'error': 'No data available'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Convert to DataFrame
+        # Convert to list and reverse to get chronological order
         data = list(queryset.values('timestamp', 'open', 'high', 'low', 'close', 'volume'))
+        data.reverse()
         df = pd.DataFrame(data)
 
         # Calculate indicator
         calc = TechnicalIndicators()
 
-        if indicator_type == 'rsi':
-            values = calc.calculate_rsi(df, period=period)
-            result = calc.prepare_indicator_data(df['timestamp'], values)
+        try:
+            if indicator_type == 'rsi':
+                values = calc.calculate_rsi(df, period=period)
+                result = calc.prepare_indicator_data(df['timestamp'], values)
 
-        elif indicator_type == 'sma':
-            values = calc.calculate_sma(df, period=period)
-            result = calc.prepare_indicator_data(df['timestamp'], values)
+            elif indicator_type == 'sma':
+                values = calc.calculate_sma(df, period=period)
+                result = calc.prepare_indicator_data(df['timestamp'], values)
 
-        elif indicator_type == 'ema':
-            values = calc.calculate_ema(df, period=period)
-            result = calc.prepare_indicator_data(df['timestamp'], values)
+            elif indicator_type == 'ema':
+                values = calc.calculate_ema(df, period=period)
+                result = calc.prepare_indicator_data(df['timestamp'], values)
 
-        elif indicator_type == 'bb':
-            bands = calc.calculate_bollinger_bands(df, period=period)
-            result = calc.prepare_bollinger_data(df['timestamp'], bands)
+            elif indicator_type == 'bb':
+                bands = calc.calculate_bollinger_bands(df, period=period)
+                result = calc.prepare_bollinger_data(df['timestamp'], bands)
 
-        else:
+        except Exception as e:
             return Response(
-                {'error': f'Unknown indicator: {indicator_type}'},
-                status=status.HTTP_400_BAD_REQUEST
+                {'error': f'Error calculating indicator: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
         return Response({
@@ -239,3 +313,60 @@ class DataSummaryView(APIView):
             }
 
         return Response(summary)
+
+
+class UpdateDatabaseView(APIView):
+    """
+    POST /api/update-database/
+
+    Triggers database update by running db_manager.py script.
+
+    Returns:
+        JSON with update status and results
+    """
+
+    def post(self, request):
+        import subprocess
+        import sys
+        from pathlib import Path
+        from django.conf import settings
+
+        try:
+            # Path to db_manager.py (one level up from webapp directory)
+            db_manager_path = settings.BASE_DIR.parent / 'db_manager.py'
+
+            if not db_manager_path.exists():
+                return Response(
+                    {'error': f'db_manager.py not found at {db_manager_path}'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Run db_manager.py as subprocess
+            result = subprocess.run(
+                [sys.executable, str(db_manager_path)],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes timeout
+            )
+
+            # Parse output
+            success = result.returncode == 0
+
+            return Response({
+                'success': success,
+                'message': 'Database update completed' if success else 'Database update failed',
+                'stdout': result.stdout[-1000:] if result.stdout else '',  # Last 1000 chars
+                'stderr': result.stderr[-1000:] if result.stderr else '',
+                'return_code': result.returncode
+            })
+
+        except subprocess.TimeoutExpired:
+            return Response(
+                {'error': 'Database update timed out (exceeded 5 minutes)'},
+                status=status.HTTP_408_REQUEST_TIMEOUT
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Error running database update: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

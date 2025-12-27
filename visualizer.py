@@ -72,8 +72,9 @@ class BTCVisualizer:
             raise FileNotFoundError(error_msg)
 
         try:
-            conn = sqlite3.connect(self.db_name)
-            conn.close()
+            with sqlite3.connect(self.db_name) as conn:
+                # Connection successful, database is accessible
+                pass
             logger.info(f"Successfully connected to database {self.db_name}")
         except sqlite3.Error as e:
             logger.error(f"Failed to connect to database: {e}")
@@ -103,29 +104,31 @@ class BTCVisualizer:
 
         table_name = self.TIMEFRAMES[timeframe]
 
+        # Validate table name against whitelist
+        if table_name not in self.TIMEFRAMES.values():
+            raise ValueError(f"Invalid table name: {table_name}")
+
         try:
-            conn = sqlite3.connect(self.db_name)
+            with sqlite3.connect(self.db_name) as conn:
+                # Build query with optional date filtering
+                query = f"""
+                    SELECT datum, open, high, low, close, volume
+                    FROM {table_name}
+                """
 
-            # Build query with optional date filtering
-            query = f"""
-                SELECT datum, open, high, low, close, volume
-                FROM {table_name}
-            """
+                conditions = []
+                if start_date:
+                    conditions.append(f"datum >= '{start_date}'")
+                if end_date:
+                    conditions.append(f"datum <= '{end_date}'")
 
-            conditions = []
-            if start_date:
-                conditions.append(f"datum >= '{start_date}'")
-            if end_date:
-                conditions.append(f"datum <= '{end_date}'")
+                if conditions:
+                    query += " WHERE " + " AND ".join(conditions)
 
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
+                query += " ORDER BY datum ASC"
 
-            query += " ORDER BY datum ASC"
-
-            # Load data
-            df = pd.read_sql_query(query, conn)
-            conn.close()
+                # Load data
+                df = pd.read_sql_query(query, conn)
 
             if df.empty:
                 logger.warning(f"No data found for {timeframe} timeframe with given filters")
@@ -304,21 +307,29 @@ class BTCVisualizer:
         Returns:
             Tuple of (datetime, close_price) or None if no data
         """
+        if timeframe not in self.TIMEFRAMES:
+            logger.error(f"Invalid timeframe: {timeframe}")
+            return None
+
+        table_name = self.TIMEFRAMES[timeframe]
+
+        # Validate table name against whitelist
+        if table_name not in self.TIMEFRAMES.values():
+            logger.error(f"Invalid table name: {table_name}")
+            return None
+
         try:
-            conn = sqlite3.connect(self.db_name)
-            table_name = self.TIMEFRAMES[timeframe]
+            with sqlite3.connect(self.db_name) as conn:
+                query = f"""
+                    SELECT datum, close
+                    FROM {table_name}
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                """
 
-            query = f"""
-                SELECT datum, close
-                FROM {table_name}
-                ORDER BY timestamp DESC
-                LIMIT 1
-            """
-
-            cursor = conn.cursor()
-            cursor.execute(query)
-            result = cursor.fetchone()
-            conn.close()
+                cursor = conn.cursor()
+                cursor.execute(query)
+                result = cursor.fetchone()
 
             if result:
                 datum, close = result
@@ -375,8 +386,22 @@ def main():
         if choice == '1':
             print("\nAvailable timeframes: 15m, 1h, 4h, 1d")
             timeframe = input("Enter timeframe (default: 1h): ").strip() or '1h'
+
+            # Validate timeframe
+            if timeframe not in ['15m', '1h', '4h', '1d']:
+                print(f"Invalid timeframe '{timeframe}'. Using default: 1h")
+                timeframe = '1h'
+
             days = input("Enter number of days to display (default: 30): ").strip()
-            days_back = int(days) if days else 30
+
+            # Validate days input
+            try:
+                days_back = int(days) if days else 30
+                if days_back <= 0:
+                    raise ValueError("Days must be positive")
+            except ValueError as e:
+                print(f"Invalid input '{days}'. Using default: 30 days")
+                days_back = 30
 
             visualizer.plot_timeframe(
                 timeframe=timeframe,
@@ -386,7 +411,16 @@ def main():
 
         elif choice == '2':
             days = input("Enter number of days to display (default: 30): ").strip()
-            days_back = int(days) if days else 30
+
+            # Validate days input
+            try:
+                days_back = int(days) if days else 30
+                if days_back <= 0:
+                    raise ValueError("Days must be positive")
+            except ValueError as e:
+                print(f"Invalid input '{days}'. Using default: 30 days")
+                days_back = 30
+
             save_dir = input("Enter save directory (default: ./charts): ").strip() or './charts'
 
             visualizer.plot_all_timeframes(
@@ -399,7 +433,15 @@ def main():
 
         elif choice == '3':
             days = input("Enter number of days to display (default: 30): ").strip()
-            days_back = int(days) if days else 30
+
+            # Validate days input
+            try:
+                days_back = int(days) if days else 30
+                if days_back <= 0:
+                    raise ValueError("Days must be positive")
+            except ValueError as e:
+                print(f"Invalid input '{days}'. Using default: 30 days")
+                days_back = 30
 
             print("\nNote: Charts will be displayed one at a time. Close each window to see the next.")
             visualizer.plot_all_timeframes(

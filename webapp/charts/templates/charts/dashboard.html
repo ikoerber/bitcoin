@@ -6,7 +6,7 @@
     <title>BTC/EUR Trading Dashboard</title>
 
     <!-- TradingView Lightweight Charts from CDN -->
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 
     <!-- Custom CSS -->
     {% load static %}
@@ -39,6 +39,21 @@
             </div>
 
             <div class="control-group">
+                <label for="candle-limit">Anzahl Kerzen:</label>
+                <select id="candle-limit" class="control-select">
+                    <option value="100">100 (schnell)</option>
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                    <option value="2000" selected>2000 (Standard)</option>
+                    <option value="5000">5000</option>
+                    <option value="10000">10000 (max)</option>
+                </select>
+                <small style="display: block; color: #888; margin-top: 4px;">
+                    Hinweis: Mehr Kerzen = mehr Historie beim Scrollen
+                </small>
+            </div>
+
+            <div class="control-group">
                 <label>Technische Indikatoren:</label>
                 <div class="indicator-toggles">
                     <label class="toggle-label">
@@ -63,6 +78,7 @@
             <div class="control-group">
                 <button id="refresh-btn" class="btn-primary">Aktualisieren</button>
                 <button id="auto-refresh-toggle" class="btn-secondary">Auto-Refresh: AUS</button>
+                <button id="update-db-btn" class="btn-warning" style="background: #ff9800;">📥 Daten von Binance laden</button>
             </div>
         </div>
 

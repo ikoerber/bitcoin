@@ -37,8 +37,14 @@ class TechnicalIndicators:
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
-        rs = gain / loss
+        # Prevent division by zero: replace zero loss with NaN
+        # When loss is 0, RSI should be 100 (all gains, no losses)
+        rs = gain / loss.replace(0, np.nan)
         rsi = 100 - (100 / (1 + rs))
+
+        # Handle edge case: when loss is 0 (all gains), RSI = 100
+        rsi = rsi.fillna(100)
+
         return rsi
 
     @staticmethod

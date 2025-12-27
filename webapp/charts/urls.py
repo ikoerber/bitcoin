@@ -16,4 +16,5 @@ urlpatterns = [
     path('api/latest-price/<str:timeframe>/', views.LatestPriceView.as_view(), name='latest-price'),
     path('api/indicators/<str:timeframe>/', views.IndicatorsView.as_view(), name='indicators'),
     path('api/summary/', views.DataSummaryView.as_view(), name='summary'),
+    path('api/update-database/', views.UpdateDatabaseView.as_view(), name='update-database'),
 ]

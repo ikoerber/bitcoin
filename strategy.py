@@ -76,8 +76,9 @@ class TechnicalAnalyzer:
             raise FileNotFoundError(error_msg)
 
         try:
-            conn = sqlite3.connect(self.db_name)
-            conn.close()
+            with sqlite3.connect(self.db_name) as conn:
+                # Connection successful, database is accessible
+                pass
             logger.info(f"Successfully connected to database {self.db_name}")
         except sqlite3.Error as e:
             logger.error(f"Failed to connect to database: {e}")
@@ -107,32 +108,34 @@ class TechnicalAnalyzer:
 
         table_name = self.TIMEFRAMES[timeframe]
 
+        # Validate table name against whitelist
+        if table_name not in self.TIMEFRAMES.values():
+            raise ValueError(f"Invalid table name: {table_name}")
+
         try:
-            conn = sqlite3.connect(self.db_name)
+            with sqlite3.connect(self.db_name) as conn:
+                # Build query
+                query = f"""
+                    SELECT datum, open, high, low, close, volume
+                    FROM {table_name}
+                """
 
-            # Build query
-            query = f"""
-                SELECT datum, open, high, low, close, volume
-                FROM {table_name}
-            """
+                conditions = []
+                if start_date:
+                    conditions.append(f"datum >= '{start_date}'")
+                if end_date:
+                    conditions.append(f"datum <= '{end_date}'")
 
-            conditions = []
-            if start_date:
-                conditions.append(f"datum >= '{start_date}'")
-            if end_date:
-                conditions.append(f"datum <= '{end_date}'")
+                if conditions:
+                    query += " WHERE " + " AND ".join(conditions)
 
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
+                query += " ORDER BY datum ASC"
 
-            query += " ORDER BY datum ASC"
+                if limit:
+                    query += f" LIMIT {limit}"
 
-            if limit:
-                query += f" LIMIT {limit}"
-
-            # Load data
-            df = pd.read_sql_query(query, conn)
-            conn.close()
+                # Load data
+                df = pd.read_sql_query(query, conn)
 
             if df.empty:
                 logger.warning(f"No data found for {timeframe} timeframe with given filters")
@@ -422,18 +425,49 @@ def main():
         elif choice == '2':
             print("\nAvailable timeframes: 15m, 1h, 4h, 1d")
             timeframe = input("Enter timeframe (default: 1h): ").strip() or '1h'
+
+            # Validate timeframe
+            if timeframe not in ['15m', '1h', '4h', '1d']:
+                print(f"Invalid timeframe '{timeframe}'. Using default: 1h")
+                timeframe = '1h'
+
             analyzer.print_statistics(timeframe)
 
         elif choice == '3':
             days = input("Enter number of days to analyze (default: 30): ").strip()
-            days_back = int(days) if days else 30
+
+            # Validate days input
+            try:
+                days_back = int(days) if days else 30
+                if days_back <= 0:
+                    raise ValueError("Days must be positive")
+            except ValueError as e:
+                print(f"Invalid input '{days}'. Using default: 30 days")
+                days_back = 30
+
             analyzer.analyze_all_timeframes(days_back=days_back)
 
         elif choice == '4':
             print("\nAvailable timeframes: 15m, 1h, 4h, 1d")
             timeframe = input("Enter timeframe: ").strip() or '1h'
+
+            # Validate timeframe
+            if timeframe not in ['15m', '1h', '4h', '1d']:
+                print(f"Invalid timeframe '{timeframe}'. Using default: 1h")
+                timeframe = '1h'
+
             periods = input("Enter number of periods (default: all): ").strip()
-            limit = int(periods) if periods else None
+
+            # Validate periods input
+            limit = None
+            if periods:
+                try:
+                    limit = int(periods)
+                    if limit <= 0:
+                        raise ValueError("Periods must be positive")
+                except ValueError as e:
+                    print(f"Invalid input '{periods}'. Using all available data")
+                    limit = None
 
             df = analyzer.load_data(timeframe, limit=limit)
             if not df.empty:

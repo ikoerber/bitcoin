@@ -4,6 +4,7 @@ Django settings for bitcoin_webapp project.
 Generated for Bitcoin Trading Data Visualization Web Application.
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -11,13 +12,24 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 # SECURITY WARNING: keep the secret key used in production secret!
-# This is for local development only
-SECRET_KEY = 'django-insecure-local-dev-bitcoin-trading-app-change-in-production'
+SECRET_KEY = os.getenv(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-local-dev-bitcoin-trading-app-change-in-production'
+)
+
+# Warn if using default secret key
+if SECRET_KEY == 'django-insecure-local-dev-bitcoin-trading-app-change-in-production':
+    import warnings
+    warnings.warn(
+        "WARNING: Using default SECRET_KEY. Set DJANGO_SECRET_KEY environment variable for production!",
+        RuntimeWarning
+    )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+# Parse ALLOWED_HOSTS from environment variable (comma-separated)
+ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 # Application definition
@@ -75,7 +87,10 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         # CRITICAL: Point to existing database in parent directory
-        'NAME': BASE_DIR.parent / 'btc_eur_data.db',
+        'NAME': Path(os.getenv('BTC_DB_PATH', str(BASE_DIR.parent / 'btc_eur_data.db'))),
+        'OPTIONS': {
+            'timeout': 20,  # Increase timeout for busy database
+        }
     }
 }
 
@@ -138,5 +153,18 @@ REST_FRAMEWORK = {
 }
 
 
-# CORS settings (for development)
-CORS_ALLOW_ALL_ORIGINS = True  # Only for local development
+# CORS settings
+# Parse CORS_ALLOWED_ORIGINS from environment variable (comma-separated)
+cors_origins = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:8000,http://127.0.0.1:8000')
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins.split(',') if origin.strip()]
+
+# Only allow all origins if explicitly set (for development)
+CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL', 'False') == 'True'
+
+# Warn if CORS_ALLOW_ALL_ORIGINS is True
+if CORS_ALLOW_ALL_ORIGINS:
+    import warnings
+    warnings.warn(
+        "WARNING: CORS_ALLOW_ALL_ORIGINS is True. This should only be used in development!",
+        RuntimeWarning
+    )

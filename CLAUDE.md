@@ -115,9 +115,15 @@ Parameters:
 ## Development Notes
 
 ### Data Collection Strategy
-- Incremental updates: Each timeframe checks latest timestamp and downloads only new candles
-- Duplicate prevention via timestamp primary keys
-- Minimal API calls to respect Binance rate limits
+- **Initial Load**: Automatically fetches 5 years of historical data on first run
+  - Downloads data in batches of 1000 candles per request
+  - ~175 requests for 15m, ~44 for 1h, ~11 for 4h, ~2 for 1d
+  - Estimated duration: 4-5 minutes for all timeframes
+  - Progress logging after each batch
+- **Incremental Updates**: Each timeframe checks latest timestamp and downloads only new candles
+- **Duplicate Prevention**: Via timestamp primary keys
+- **Rate Limiting**: 1 second delay between requests during initial load, 0.5s for updates
+- **Safety Limits**: Maximum 100 requests per timeframe to prevent infinite loops
 
 ### Security Considerations
 - All API interactions are read-only (no trading functionality)
