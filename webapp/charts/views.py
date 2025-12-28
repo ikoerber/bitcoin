@@ -409,6 +409,108 @@ class GapsView(APIView):
             )
 
 
+class OrderblocksView(APIView):
+    """
+    GET /api/orderblocks/<timeframe>/?min_move=1.0&lookback=20&limit=500
+
+    Detect and return orderblocks (Smart Money Concepts) for a given timeframe.
+
+    Parameters:
+        - timeframe: 15m, 1h, 4h, 1d
+        - min_move: Minimum price move to confirm OB (default: 1.0%)
+        - lookback: Candles to check for move confirmation (default: 20)
+        - limit: Number of candles to analyze (default: 500, max: 10000)
+
+    Returns:
+        JSON with list of detected orderblocks including type, price levels, and mitigation status
+    """
+
+    def get(self, request, timeframe):
+        # Validate timeframe
+        if timeframe not in TIMEFRAME_MODELS:
+            return Response(
+                {'error': f'Invalid timeframe: {timeframe}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get parameters
+        try:
+            min_move = float(request.GET.get('min_move', 1.0))
+            if min_move < 0:
+                return Response(
+                    {'error': 'min_move must be non-negative'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except ValueError:
+            return Response(
+                {'error': 'Invalid min_move parameter. Must be a number.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            lookback = int(request.GET.get('lookback', 20))
+            if lookback <= 0 or lookback > 100:
+                return Response(
+                    {'error': 'lookback must be between 1 and 100'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except ValueError:
+            return Response(
+                {'error': 'Invalid lookback parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            limit = int(request.GET.get('limit', 500))
+            if limit <= 0:
+                return Response(
+                    {'error': 'Limit must be a positive integer'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            limit = min(limit, 10000)
+        except ValueError:
+            return Response(
+                {'error': 'Invalid limit parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Fetch OHLCV data
+        model = TIMEFRAME_MODELS[timeframe]
+        queryset = model.objects.order_by('-timestamp')[:limit]
+
+        if not queryset.exists():
+            return Response(
+                {'error': 'No data available'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Convert to DataFrame
+        data = list(queryset.values('timestamp', 'open', 'high', 'low', 'close', 'volume'))
+        data.reverse()  # Chronological order
+        df = pd.DataFrame(data)
+
+        # Detect orderblocks
+        calc = TechnicalIndicators()
+
+        try:
+            orderblocks = calc.detect_orderblocks(df, min_move_percent=min_move, lookback=lookback)
+
+            return Response({
+                'timeframe': timeframe,
+                'min_move_percent': min_move,
+                'lookback': lookback,
+                'count': len(orderblocks),
+                'orderblocks': orderblocks
+            })
+
+        except Exception as e:
+            logger.error(f"Error detecting orderblocks: {e}")
+            return Response(
+                {'error': f'Error detecting orderblocks: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 class DataSummaryView(APIView):
     """
     GET /api/summary/
