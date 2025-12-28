@@ -32,7 +32,23 @@ class TechnicalIndicators:
 
         Returns:
             Series with RSI values (0-100)
+
+        Raises:
+            ValueError: If DataFrame is invalid or missing required columns
         """
+        # Input validation
+        if df.empty:
+            raise ValueError("DataFrame is empty")
+
+        if 'close' not in df.columns:
+            raise ValueError("DataFrame must have 'close' column")
+
+        if period <= 0:
+            raise ValueError("Period must be positive")
+
+        if len(df) < period:
+            raise ValueError(f"Need at least {period} data points for RSI calculation (have {len(df)})")
+
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -61,7 +77,23 @@ class TechnicalIndicators:
 
         Returns:
             Series with SMA values
+
+        Raises:
+            ValueError: If DataFrame is invalid or missing required columns
         """
+        # Input validation
+        if df.empty:
+            raise ValueError("DataFrame is empty")
+
+        if 'close' not in df.columns:
+            raise ValueError("DataFrame must have 'close' column")
+
+        if period <= 0:
+            raise ValueError("Period must be positive")
+
+        if len(df) < period:
+            raise ValueError(f"Need at least {period} data points for SMA calculation (have {len(df)})")
+
         return df['close'].rolling(window=period).mean()
 
     @staticmethod
@@ -78,7 +110,23 @@ class TechnicalIndicators:
 
         Returns:
             Series with EMA values
+
+        Raises:
+            ValueError: If DataFrame is invalid or missing required columns
         """
+        # Input validation
+        if df.empty:
+            raise ValueError("DataFrame is empty")
+
+        if 'close' not in df.columns:
+            raise ValueError("DataFrame must have 'close' column")
+
+        if period <= 0:
+            raise ValueError("Period must be positive")
+
+        if len(df) < period:
+            raise ValueError(f"Need at least {period} data points for EMA calculation (have {len(df)})")
+
         return df['close'].ewm(span=period, adjust=False).mean()
 
     @staticmethod
@@ -100,7 +148,26 @@ class TechnicalIndicators:
 
         Returns:
             Dictionary with 'upper', 'middle', 'lower' series
+
+        Raises:
+            ValueError: If DataFrame is invalid or missing required columns
         """
+        # Input validation
+        if df.empty:
+            raise ValueError("DataFrame is empty")
+
+        if 'close' not in df.columns:
+            raise ValueError("DataFrame must have 'close' column")
+
+        if period <= 0:
+            raise ValueError("Period must be positive")
+
+        if std_dev <= 0:
+            raise ValueError("Standard deviation multiplier must be positive")
+
+        if len(df) < period:
+            raise ValueError(f"Need at least {period} data points for Bollinger Bands calculation (have {len(df)})")
+
         middle = df['close'].rolling(window=period).mean()
         std = df['close'].rolling(window=period).std()
 
