@@ -230,3 +230,184 @@ class TechnicalIndicators:
                     'lower': float(bands['lower'].iloc[i])
                 })
         return result
+
+    @staticmethod
+    def detect_gaps(df: pd.DataFrame, min_gap_percent: float = 0.1) -> List[Dict[str, Any]]:
+        """
+        Detect price gaps (liquidity gaps) in OHLCV data.
+
+        A gap occurs when:
+        - Bullish Gap: Current candle's low > Previous candle's high
+        - Bearish Gap: Current candle's high < Previous candle's low
+
+        Args:
+            df: DataFrame with OHLCV data
+            min_gap_percent: Minimum gap size as percentage of price (default: 0.1%)
+
+        Returns:
+            List of gaps with start_time, end_time, gap_high, gap_low, gap_type, filled status
+        """
+        # Input validation
+        if df.empty:
+            raise ValueError("DataFrame is empty")
+
+        required_cols = ['timestamp', 'high', 'low', 'close']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"DataFrame missing required columns: {missing_cols}")
+
+        if len(df) < 2:
+            raise ValueError("Need at least 2 data points for gap detection")
+
+        gaps = []
+
+        for i in range(1, len(df)):
+            prev_candle = df.iloc[i-1]
+            curr_candle = df.iloc[i]
+
+            # Bullish gap: current low > previous high
+            if curr_candle['low'] > prev_candle['high']:
+                gap_size = curr_candle['low'] - prev_candle['high']
+                gap_percent = (gap_size / prev_candle['close']) * 100
+
+                if gap_percent >= min_gap_percent:
+                    gap = {
+                        'start_time': int(prev_candle['timestamp'] // 1000),
+                        'end_time': int(curr_candle['timestamp'] // 1000),
+                        'gap_low': float(prev_candle['high']),
+                        'gap_high': float(curr_candle['low']),
+                        'gap_type': 'bullish',
+                        'gap_size': float(gap_size),
+                        'gap_percent': float(gap_percent),
+                        'filled': False  # Will be updated below
+                    }
+
+                    # Check if gap has been filled in subsequent candles
+                    for j in range(i + 1, len(df)):
+                        future_candle = df.iloc[j]
+                        if future_candle['low'] <= prev_candle['high']:
+                            gap['filled'] = True
+                            gap['filled_time'] = int(future_candle['timestamp'] // 1000)
+                            break
+
+                    gaps.append(gap)
+
+            # Bearish gap: current high < previous low
+            elif curr_candle['high'] < prev_candle['low']:
+                gap_size = prev_candle['low'] - curr_candle['high']
+                gap_percent = (gap_size / prev_candle['close']) * 100
+
+                if gap_percent >= min_gap_percent:
+                    gap = {
+                        'start_time': int(prev_candle['timestamp'] // 1000),
+                        'end_time': int(curr_candle['timestamp'] // 1000),
+                        'gap_low': float(curr_candle['high']),
+                        'gap_high': float(prev_candle['low']),
+                        'gap_type': 'bearish',
+                        'gap_size': float(gap_size),
+                        'gap_percent': float(gap_percent),
+                        'filled': False
+                    }
+
+                    # Check if gap has been filled
+                    for j in range(i + 1, len(df)):
+                        future_candle = df.iloc[j]
+                        if future_candle['high'] >= prev_candle['low']:
+                            gap['filled'] = True
+                            gap['filled_time'] = int(future_candle['timestamp'] // 1000)
+                            break
+
+                    gaps.append(gap)
+
+        return gaps
+
+    @staticmethod
+    def detect_fair_value_gaps(df: pd.DataFrame, min_gap_percent: float = 0.1) -> List[Dict[str, Any]]:
+        """
+        Detect Fair Value Gaps (FVG) using ICT methodology.
+
+        FVG occurs when three consecutive candles show:
+        - Bullish FVG: Candle 1 high < Candle 3 low (gap in middle)
+        - Bearish FVG: Candle 1 low > Candle 3 high (gap in middle)
+
+        Args:
+            df: DataFrame with OHLCV data
+            min_gap_percent: Minimum gap size as percentage (default: 0.1%)
+
+        Returns:
+            List of FVGs with time, price levels, type, and filled status
+        """
+        # Input validation
+        if df.empty:
+            raise ValueError("DataFrame is empty")
+
+        required_cols = ['timestamp', 'high', 'low', 'close']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"DataFrame missing required columns: {missing_cols}")
+
+        if len(df) < 3:
+            raise ValueError("Need at least 3 data points for FVG detection")
+
+        fvgs = []
+
+        for i in range(len(df) - 2):
+            candle1 = df.iloc[i]
+            candle2 = df.iloc[i + 1]
+            candle3 = df.iloc[i + 2]
+
+            # Bullish FVG: candle1 high < candle3 low
+            if candle1['high'] < candle3['low']:
+                gap_size = candle3['low'] - candle1['high']
+                gap_percent = (gap_size / candle1['close']) * 100
+
+                if gap_percent >= min_gap_percent:
+                    fvg = {
+                        'start_time': int(candle1['timestamp'] // 1000),
+                        'end_time': int(candle3['timestamp'] // 1000),
+                        'gap_low': float(candle1['high']),
+                        'gap_high': float(candle3['low']),
+                        'gap_type': 'bullish_fvg',
+                        'gap_size': float(gap_size),
+                        'gap_percent': float(gap_percent),
+                        'filled': False
+                    }
+
+                    # Check if FVG has been filled
+                    for j in range(i + 3, len(df)):
+                        future_candle = df.iloc[j]
+                        if future_candle['low'] <= candle1['high']:
+                            fvg['filled'] = True
+                            fvg['filled_time'] = int(future_candle['timestamp'] // 1000)
+                            break
+
+                    fvgs.append(fvg)
+
+            # Bearish FVG: candle1 low > candle3 high
+            elif candle1['low'] > candle3['high']:
+                gap_size = candle1['low'] - candle3['high']
+                gap_percent = (gap_size / candle1['close']) * 100
+
+                if gap_percent >= min_gap_percent:
+                    fvg = {
+                        'start_time': int(candle1['timestamp'] // 1000),
+                        'end_time': int(candle3['timestamp'] // 1000),
+                        'gap_low': float(candle3['high']),
+                        'gap_high': float(candle1['low']),
+                        'gap_type': 'bearish_fvg',
+                        'gap_size': float(gap_size),
+                        'gap_percent': float(gap_percent),
+                        'filled': False
+                    }
+
+                    # Check if FVG has been filled
+                    for j in range(i + 3, len(df)):
+                        future_candle = df.iloc[j]
+                        if future_candle['high'] >= candle1['low']:
+                            fvg['filled'] = True
+                            fvg['filled_time'] = int(future_candle['timestamp'] // 1000)
+                            break
+
+                    fvgs.append(fvg)
+
+        return fvgs

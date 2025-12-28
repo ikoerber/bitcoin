@@ -310,6 +310,105 @@ class IndicatorsView(APIView):
         })
 
 
+class GapsView(APIView):
+    """
+    GET /api/gaps/<timeframe>/?gap_type=regular&min_gap=0.1&limit=500
+
+    Detect and return price gaps (liquidity gaps) for a given timeframe.
+
+    Parameters:
+        - timeframe: 15m, 1h, 4h, 1d
+        - gap_type: 'regular' for standard gaps, 'fvg' for Fair Value Gaps (default: regular)
+        - min_gap: Minimum gap size as percentage (default: 0.1%)
+        - limit: Number of candles to analyze (default: 500, max: 10000)
+
+    Returns:
+        JSON with list of detected gaps including type, price levels, and filled status
+    """
+
+    def get(self, request, timeframe):
+        # Validate timeframe
+        if timeframe not in TIMEFRAME_MODELS:
+            return Response(
+                {'error': f'Invalid timeframe: {timeframe}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get parameters
+        gap_type = request.GET.get('gap_type', 'regular')
+        if gap_type not in ['regular', 'fvg']:
+            return Response(
+                {'error': 'gap_type must be "regular" or "fvg"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            min_gap = float(request.GET.get('min_gap', 0.1))
+            if min_gap < 0:
+                return Response(
+                    {'error': 'min_gap must be non-negative'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except ValueError:
+            return Response(
+                {'error': 'Invalid min_gap parameter. Must be a number.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            limit = int(request.GET.get('limit', 500))
+            if limit <= 0:
+                return Response(
+                    {'error': 'Limit must be a positive integer'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            limit = min(limit, 10000)
+        except ValueError:
+            return Response(
+                {'error': 'Invalid limit parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Fetch OHLCV data
+        model = TIMEFRAME_MODELS[timeframe]
+        queryset = model.objects.order_by('-timestamp')[:limit]
+
+        if not queryset.exists():
+            return Response(
+                {'error': 'No data available'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Convert to DataFrame
+        data = list(queryset.values('timestamp', 'open', 'high', 'low', 'close', 'volume'))
+        data.reverse()  # Chronological order
+        df = pd.DataFrame(data)
+
+        # Detect gaps
+        calc = TechnicalIndicators()
+
+        try:
+            if gap_type == 'regular':
+                gaps = calc.detect_gaps(df, min_gap_percent=min_gap)
+            else:  # fvg
+                gaps = calc.detect_fair_value_gaps(df, min_gap_percent=min_gap)
+
+            return Response({
+                'timeframe': timeframe,
+                'gap_type': gap_type,
+                'min_gap_percent': min_gap,
+                'count': len(gaps),
+                'gaps': gaps
+            })
+
+        except Exception as e:
+            logger.error(f"Error detecting gaps: {e}")
+            return Response(
+                {'error': f'Error detecting gaps: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 class DataSummaryView(APIView):
     """
     GET /api/summary/

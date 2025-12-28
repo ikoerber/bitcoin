@@ -80,6 +80,13 @@
                 <button id="auto-refresh-toggle" class="btn-secondary">Auto-Refresh: AUS</button>
                 <button id="update-db-btn" class="btn-warning" style="background: #ff9800;">📥 Daten von Binance laden</button>
             </div>
+
+            <!-- Gap Analysis Controls -->
+            <div class="control-group">
+                <label>Liquiditätslücken (Gaps):</label>
+                <button id="gaps-toggle" class="btn-secondary" onclick="toggleGaps()">📊 Gaps: AUS</button>
+                <button id="gap-type-toggle" class="btn-secondary" onclick="toggleGapType()" title="Standard Price Gaps">Regular</button>
+            </div>
         </div>
 
         <!-- Chart Container -->
