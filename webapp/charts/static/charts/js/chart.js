@@ -278,6 +278,16 @@ async function onTimeframeChange(timeframe) {
             await toggleIndicator(indicator, true);
         }
     }
+
+    // Reload gaps if enabled
+    if (gapsEnabled) {
+        await loadAndDisplayGaps();
+    }
+
+    // Reload orderblocks if enabled
+    if (orderblocksEnabled) {
+        await loadAndDisplayOrderblocks();
+    }
 }
 
 /**
