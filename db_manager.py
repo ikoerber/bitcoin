@@ -137,36 +137,50 @@ class BTCDataManager:
             logger.error(f"Error getting latest timestamp from {table_name}: {e}")
             return None
 
-    def _fetch_ohlcv(self, timeframe: str, since: Optional[int] = None, limit: int = 10000) -> List[List]:
+    def _fetch_ohlcv(self, timeframe: str, since: Optional[int] = None, limit: int = 10000, max_retries: int = 3) -> List[List]:
         """
-        Fetch OHLCV data from Binance.
+        Fetch OHLCV data from Binance with retry logic.
 
         Args:
             timeframe: Timeframe string (15m, 1h, 4h, 1d)
             since: Starting timestamp in milliseconds (None = fetch latest)
             limit: Maximum number of candles to fetch (default: 10000)
+            max_retries: Maximum number of retry attempts (default: 3)
 
         Returns:
             List of OHLCV candles
         """
-        try:
-            ohlcv = self.exchange.fetch_ohlcv(
-                symbol=self.SYMBOL,
-                timeframe=timeframe,
-                since=since,
-                limit=limit
-            )
-            logger.info(f"Fetched {len(ohlcv)} candles for {timeframe} timeframe")
-            return ohlcv
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error fetching {timeframe} data: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error fetching {timeframe} data: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error fetching {timeframe} data: {e}")
-            raise
+        for attempt in range(max_retries):
+            try:
+                ohlcv = self.exchange.fetch_ohlcv(
+                    symbol=self.SYMBOL,
+                    timeframe=timeframe,
+                    since=since,
+                    limit=limit
+                )
+                logger.info(f"Fetched {len(ohlcv)} candles for {timeframe} timeframe")
+                return ohlcv
+
+            except ccxt.NetworkError as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    logger.warning(
+                        f"Network error on attempt {attempt + 1}/{max_retries} for {timeframe}: {e}. "
+                        f"Retrying in {wait_time}s..."
+                    )
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"Network error fetching {timeframe} data after {max_retries} attempts: {e}")
+                    raise
+
+            except ccxt.ExchangeError as e:
+                # Don't retry on exchange errors (invalid params, rate limits handled by ccxt, etc.)
+                logger.error(f"Exchange error fetching {timeframe} data: {e}")
+                raise
+
+            except Exception as e:
+                logger.error(f"Unexpected error fetching {timeframe} data: {e}")
+                raise
 
     def _store_ohlcv(self, table_name: str, ohlcv_data: List[List]) -> int:
         """

@@ -149,12 +149,20 @@ class LatestPriceView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Get previous candle for change calculation
-        previous = model.objects.order_by('-timestamp')[1:2].first()
+        # Get previous candle for change calculation (safe index access)
+        queryset = model.objects.order_by('-timestamp')[:2]
+        candles = list(queryset)
 
         change_percent = None
-        if previous:
-            change_percent = ((latest.close - previous.close) / previous.close) * 100
+        if len(candles) >= 2:
+            previous = candles[1]
+            try:
+                # Prevent division by zero
+                if previous.close != 0:
+                    change_percent = ((latest.close - previous.close) / previous.close) * 100
+            except (ZeroDivisionError, AttributeError) as e:
+                logger.warning(f"Could not calculate price change percentage: {e}")
+                change_percent = None
 
         data = {
             'timeframe': timeframe,
@@ -250,6 +258,23 @@ class IndicatorsView(APIView):
         data.reverse()
         df = pd.DataFrame(data)
 
+        # Validate DataFrame has sufficient data for indicator calculation
+        if df.empty:
+            return Response(
+                {'error': 'No data available for indicator calculation'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if len(df) < period:
+            return Response(
+                {
+                    'error': f'Insufficient data. Need at least {period} candles for this indicator.',
+                    'available': len(df),
+                    'required': period
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         # Calculate indicator
         calc = TechnicalIndicators()
 
@@ -335,18 +360,33 @@ class UpdateDatabaseView(APIView):
             # Path to db_manager.py (one level up from webapp directory)
             db_manager_path = settings.BASE_DIR.parent / 'db_manager.py'
 
+            # Security checks for subprocess execution
             if not db_manager_path.exists():
                 return Response(
                     {'error': f'db_manager.py not found at {db_manager_path}'},
                     status=status.HTTP_404_NOT_FOUND
                 )
 
-            # Run db_manager.py as subprocess
+            if not db_manager_path.is_file():
+                return Response(
+                    {'error': 'db_manager.py is not a regular file'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Verify file permissions (should not be world-writable on Unix systems)
+            import os
+            stat_info = db_manager_path.stat()
+            if hasattr(stat_info, 'st_mode') and (stat_info.st_mode & 0o002):
+                logger.warning(f'db_manager.py has insecure permissions (world-writable): {oct(stat_info.st_mode)}')
+
+            # Run db_manager.py as subprocess with security measures
             result = subprocess.run(
-                [sys.executable, str(db_manager_path)],
+                [sys.executable, str(db_manager_path.resolve())],
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minutes timeout
+                timeout=300,  # 5 minutes timeout
+                cwd=str(db_manager_path.parent),  # Set working directory explicitly
+                env=os.environ.copy()  # Use clean environment copy
             )
 
             # Parse output

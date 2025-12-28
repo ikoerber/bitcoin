@@ -90,7 +90,12 @@ DATABASES = {
         'NAME': Path(os.getenv('BTC_DB_PATH', str(BASE_DIR.parent / 'btc_eur_data.db'))),
         'OPTIONS': {
             'timeout': 20,  # Increase timeout for busy database
-        }
+            'check_same_thread': False,  # Allow multi-threaded access (required for SQLite in production)
+        },
+        # Connection pooling: Keep connections alive for reuse
+        # In development (DEBUG=True), close connections after each request (CONN_MAX_AGE=0)
+        # In production (DEBUG=False), keep connections for 60 seconds to reduce overhead
+        'CONN_MAX_AGE': 0 if DEBUG else 60,
     }
 }
 

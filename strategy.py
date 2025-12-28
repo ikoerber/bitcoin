@@ -121,10 +121,25 @@ class TechnicalAnalyzer:
                 """
 
                 conditions = []
+                params = []
+
+                # Validate and add date parameters (prevent SQL injection)
+                import re
+                date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
                 if start_date:
-                    conditions.append(f"datum >= '{start_date}'")
+                    if not date_pattern.match(start_date):
+                        logger.error(f"Invalid start_date format: {start_date}. Must be YYYY-MM-DD")
+                        return None
+                    conditions.append("datum >= ?")
+                    params.append(start_date)
+
                 if end_date:
-                    conditions.append(f"datum <= '{end_date}'")
+                    if not date_pattern.match(end_date):
+                        logger.error(f"Invalid end_date format: {end_date}. Must be YYYY-MM-DD")
+                        return None
+                    conditions.append("datum <= ?")
+                    params.append(end_date)
 
                 if conditions:
                     query += " WHERE " + " AND ".join(conditions)
@@ -134,8 +149,8 @@ class TechnicalAnalyzer:
                 if limit:
                     query += f" LIMIT {limit}"
 
-                # Load data
-                df = pd.read_sql_query(query, conn)
+                # Load data with parameterized query
+                df = pd.read_sql_query(query, conn, params=params if params else None)
 
             if df.empty:
                 logger.warning(f"No data found for {timeframe} timeframe with given filters")
@@ -310,8 +325,12 @@ class TechnicalAnalyzer:
         df['bullish'] = df['close'] > df['open']
         df['bearish'] = df['close'] < df['open']
 
-        # Candle body size (as percentage of price)
-        df['body_size'] = abs(df['close'] - df['open']) / df['open'] * 100
+        # Candle body size (as percentage of price) - prevent division by zero
+        df['body_size'] = np.where(
+            df['open'] != 0,
+            abs(df['close'] - df['open']) / df['open'] * 100,
+            0.0  # If open is 0, set body_size to 0
+        )
 
         # Upper and lower wicks
         df['upper_wick'] = np.where(
