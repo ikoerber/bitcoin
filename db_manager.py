@@ -258,10 +258,43 @@ class BTCDataManager:
             logger.info(f"Latest data point: {datetime.fromtimestamp(latest_timestamp/1000)}")
             # Add 1ms to avoid duplicate
             since = latest_timestamp + 1
-            # Fetch data from Binance
-            ohlcv_data = self._fetch_ohlcv(timeframe, since=since, limit=initial_limit)
-            # Store in database
-            inserted = self._store_ohlcv(table_name, ohlcv_data)
+
+            # Fetch data in batches until caught up to current time
+            total_inserted = 0
+            batch_count = 0
+            max_batches = 200  # Safety limit to prevent infinite loops
+
+            while batch_count < max_batches:
+                # Fetch data from Binance
+                ohlcv_data = self._fetch_ohlcv(timeframe, since=since, limit=initial_limit)
+
+                if not ohlcv_data or len(ohlcv_data) == 0:
+                    # No more data available
+                    break
+
+                # Store in database
+                inserted = self._store_ohlcv(table_name, ohlcv_data)
+                total_inserted += inserted
+                batch_count += 1
+
+                # Update 'since' to the timestamp of the last fetched candle + 1ms
+                since = ohlcv_data[-1][0] + 1
+
+                logger.info(f"Batch {batch_count}: Fetched {len(ohlcv_data)} candles, inserted {inserted} new records (total: {total_inserted})")
+
+                # If we got less than the limit, we've reached current time
+                if len(ohlcv_data) < initial_limit:
+                    logger.info(f"Reached current time: fetched {len(ohlcv_data)} < {initial_limit} candles")
+                    break
+
+                # Check if we should continue
+                logger.debug(f"Continuing to next batch (fetched {len(ohlcv_data)} candles, next 'since' timestamp: {since})")
+
+                # Small delay to respect rate limits
+                time.sleep(0.5)
+
+            inserted = total_inserted
+            logger.info(f"Incremental update completed: {total_inserted} total new records added in {batch_count} batches")
         else:
             # Initial load: fetch historical data for the last X years
             inserted = self._fetch_historical_data(timeframe, table_name, years_back)
@@ -441,7 +474,8 @@ def main():
         manager = BTCDataManager()
 
         # Update all timeframes
-        results = manager.update_all_timeframes(initial_limit=10000)
+        # Note: Binance API returns max 1000 candles per request, so use 1000 as limit
+        results = manager.update_all_timeframes(initial_limit=1000)
 
         # Print results
         print("\n" + "-"*80)
