@@ -24,6 +24,12 @@ let gapSeries = [];  // Array to store gap rectangle series
 let engulfingEnabled = false;
 let engulfingMarkers = [];  // Array to store pattern markers
 
+// Trend analysis visualization
+let trendEnabled = false;
+let trendLineSeries = null;  // Main trendline
+let swingPointMarkers = [];  // Swing high/low markers
+let trendData = null;  // Cached trend data
+
 /**
  * Initialize TradingView charts (main + volume)
  */
@@ -287,6 +293,11 @@ async function onTimeframeChange(timeframe) {
     // Reload engulfing patterns if enabled
     if (engulfingEnabled) {
         await loadAndDisplayEngulfing();
+    }
+
+    // Reload trend if enabled
+    if (trendEnabled) {
+        await loadAndDisplayTrend();
     }
 }
 
@@ -721,4 +732,172 @@ function clearEngulfing() {
     engulfingMarkers = [];
 
     console.log('Cleared all engulfing pattern markers from chart');
+}
+
+/**
+ * Toggle trend analysis visualization on/off
+ */
+async function toggleTrend() {
+    trendEnabled = !trendEnabled;
+    const button = document.getElementById('trend-toggle');
+
+    if (trendEnabled) {
+        button.classList.add('active');
+        button.textContent = '📈 Trend: AN';
+        await loadAndDisplayTrend();
+    } else {
+        button.classList.remove('active');
+        button.textContent = '📈 Trend: AUS';
+        clearTrend();
+    }
+}
+
+/**
+ * Load trend data from API and display on chart
+ */
+async function loadAndDisplayTrend() {
+    try {
+        const limit = parseInt(document.getElementById('candle-limit').value) || 2000;
+        const lookback = 5;  // Default lookback window
+        const minMove = 0.5;  // Minimum 0.5% move between swings
+
+        const response = await fetch(
+            `/api/trend/${currentTimeframe}/?lookback=${lookback}&min_move=${minMove}&limit=${limit}`
+        );
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log(`Trend detected: ${data.trend_type} (confidence: ${(data.confidence * 100).toFixed(1)}%)`);
+        console.log(`Swing points: ${data.swing_points.length} (${data.statistics.swing_highs} highs, ${data.statistics.swing_lows} lows)`);
+
+        // Store trend data
+        trendData = data;
+
+        // Display trendline and swing points
+        displayTrendline(data);
+        displaySwingPoints(data.swing_points);
+
+    } catch (error) {
+        console.error('Error loading trend:', error);
+        alert(`Fehler beim Laden der Trend-Analyse:\n${error.message}`);
+    }
+}
+
+/**
+ * Display trendline on chart
+ */
+function displayTrendline(data) {
+    if (!chart || !data.trendline_points || data.trendline_points.length < 2) {
+        console.log('No trendline to display');
+        return;
+    }
+
+    clearTrendline();
+
+    // Determine color based on trend type
+    let color;
+    switch (data.trend_type) {
+        case 'uptrend':
+            color = '#26a69a';  // Green
+            break;
+        case 'downtrend':
+            color = '#ef5350';  // Red
+            break;
+        default:
+            color = '#888888';  // Gray for sideways
+    }
+
+    // Create line series for trendline
+    trendLineSeries = chart.addLineSeries({
+        color: color,
+        lineWidth: 2,
+        lineStyle: 0,  // Solid line
+        crosshairMarkerVisible: true,
+        lastValueVisible: true,
+        priceLineVisible: false,
+        title: `Trend: ${data.trend_type.toUpperCase()}`
+    });
+
+    // Set trendline data
+    trendLineSeries.setData(data.trendline_points);
+
+    console.log(`Displayed ${data.trend_type} trendline with ${data.trendline_points.length} points`);
+}
+
+/**
+ * Display swing points as markers on chart
+ */
+function displaySwingPoints(swingPoints) {
+    if (!candlestickSeries || !swingPoints || swingPoints.length === 0) {
+        console.log('No swing points to display');
+        return;
+    }
+
+    // Convert swing points to TradingView markers
+    const markers = swingPoints.map(point => {
+        const isHigh = point.type === 'high';
+
+        return {
+            time: point.time,
+            position: isHigh ? 'aboveBar' : 'belowBar',
+            color: isHigh ? '#ff9800' : '#2196f3',  // Orange for highs, blue for lows
+            shape: 'circle',
+            text: isHigh ? 'H' : 'L',
+            size: 0.5  // Small markers
+        };
+    });
+
+    // Get existing markers (e.g., engulfing patterns) and combine
+    const existingMarkers = candlestickSeries.markers() || [];
+
+    // Filter out old swing markers (H/L) but keep other markers
+    const filteredExisting = existingMarkers.filter(m => m.text !== 'H' && m.text !== 'L');
+
+    // Combine filtered existing with new swing markers
+    const combinedMarkers = [...filteredExisting, ...markers];
+
+    candlestickSeries.setMarkers(combinedMarkers);
+    swingPointMarkers = swingPoints;
+
+    console.log(`Displayed ${markers.length} swing point markers`);
+}
+
+/**
+ * Clear trendline from chart
+ */
+function clearTrendline() {
+    if (!chart || !trendLineSeries) return;
+
+    try {
+        chart.removeSeries(trendLineSeries);
+    } catch (error) {
+        console.debug('Error removing trendline series:', error);
+    }
+
+    trendLineSeries = null;
+    console.log('Cleared trendline from chart');
+}
+
+/**
+ * Clear all trend visualizations (trendline + swing markers)
+ */
+function clearTrend() {
+    clearTrendline();
+
+    // Remove swing point markers (keep other markers like engulfing)
+    if (candlestickSeries && swingPointMarkers.length > 0) {
+        const existingMarkers = candlestickSeries.markers() || [];
+        const filteredMarkers = existingMarkers.filter(marker =>
+            marker.text !== 'H' && marker.text !== 'L'
+        );
+        candlestickSeries.setMarkers(filteredMarkers);
+    }
+
+    swingPointMarkers = [];
+    trendData = null;
+
+    console.log('Cleared all trend visualizations');
 }

@@ -683,3 +683,129 @@ class UpdateDatabaseView(APIView):
                 {'error': f'Error running database update: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class TrendView(APIView):
+    """
+    GET /api/trend/<timeframe>/?lookback=5&min_move=0.5&limit=500
+
+    Detect trend direction using Higher Highs/Higher Lows methodology.
+
+    Parameters:
+        - timeframe: 15m, 1h, 4h, 1d
+        - lookback: Swing point detection window (default: 5, range: 3-20)
+        - min_move: Minimum % move between swings (default: 0.5%)
+        - limit: Number of candles to analyze (default: 500, max: 10000)
+
+    Returns:
+        JSON with trend_type, trendline coordinates, swing points, and statistics
+    """
+
+    def get(self, request, timeframe):
+        # Validate timeframe
+        if timeframe not in TIMEFRAME_MODELS:
+            return Response(
+                {'error': f'Invalid timeframe: {timeframe}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate lookback parameter
+        try:
+            lookback = int(request.GET.get('lookback', 5))
+            if lookback < 3 or lookback > 20:
+                return Response(
+                    {'error': 'lookback must be between 3 and 20'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except ValueError:
+            return Response(
+                {'error': 'Invalid lookback parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate min_move parameter
+        try:
+            min_move = float(request.GET.get('min_move', 0.5))
+            if min_move < 0 or min_move > 10:
+                return Response(
+                    {'error': 'min_move must be between 0 and 10'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except ValueError:
+            return Response(
+                {'error': 'Invalid min_move parameter. Must be a number.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate limit parameter
+        try:
+            limit = int(request.GET.get('limit', 500))
+            if limit <= 0:
+                return Response(
+                    {'error': 'Limit must be a positive integer'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            limit = min(limit, MAX_QUERY_LIMIT)
+        except ValueError:
+            return Response(
+                {'error': 'Invalid limit parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Fetch OHLCV data
+        model = TIMEFRAME_MODELS[timeframe]
+        queryset = model.objects.order_by('-timestamp')[:limit]
+
+        if not queryset.exists():
+            return Response(
+                {'error': 'No data available'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Convert to DataFrame
+        data = list(queryset.values('timestamp', 'open', 'high', 'low', 'close', 'volume'))
+        data.reverse()  # Chronological order
+        df = pd.DataFrame(data)
+
+        # Validate sufficient data
+        min_required = 2 * lookback + 3
+        if len(df) < min_required:
+            return Response(
+                {
+                    'error': f'Insufficient data. Need at least {min_required} candles.',
+                    'available': len(df),
+                    'required': min_required
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Detect trend
+        calc = TechnicalIndicators()
+
+        try:
+            trend_data = calc.detect_trend(df, lookback=lookback, min_move_percent=min_move)
+
+            return Response({
+                'timeframe': timeframe,
+                'lookback': lookback,
+                'min_move_percent': min_move,
+                'trend_type': trend_data['trend_type'],
+                'confidence': trend_data['confidence'],
+                'trendline_points': trend_data['trendline_points'],
+                'swing_points': trend_data['swing_points'],
+                'statistics': {
+                    'swing_highs': trend_data['swing_highs_count'],
+                    'swing_lows': trend_data['swing_lows_count'],
+                    'higher_highs': trend_data['higher_high_count'],
+                    'lower_highs': trend_data['lower_high_count'],
+                    'higher_lows': trend_data['higher_low_count'],
+                    'lower_lows': trend_data['lower_low_count']
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Error detecting trend: {e}")
+            return Response(
+                {'error': f'Error detecting trend: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

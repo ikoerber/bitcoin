@@ -511,6 +511,228 @@ class TechnicalIndicators:
         return orderblocks
 
     @staticmethod
+    def detect_swing_points(df: pd.DataFrame, lookback: int = 5) -> List[Dict[str, Any]]:
+        """
+        Detect swing highs and swing lows using local extrema algorithm.
+
+        A swing high is a candle whose high is the highest within lookback candles
+        on both sides. A swing low is a candle whose low is the lowest within
+        lookback candles on both sides.
+
+        Args:
+            df: DataFrame with OHLCV data
+            lookback: Number of candles to check on each side (default: 5)
+
+        Returns:
+            List of swing points with time, price, type, and index
+
+        Raises:
+            ValueError: If DataFrame is invalid or missing required columns
+        """
+        # Input validation
+        if df.empty:
+            raise ValueError("DataFrame is empty")
+
+        required_cols = ['timestamp', 'high', 'low', 'close']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"DataFrame missing required columns: {missing_cols}")
+
+        min_required = 2 * lookback + 1
+        if len(df) < min_required:
+            raise ValueError(f"Need at least {min_required} data points for swing detection (have {len(df)})")
+
+        if lookback < 1:
+            raise ValueError("Lookback must be at least 1")
+
+        swing_points = []
+
+        # Iterate through candles (skip edges where we can't look both directions)
+        for i in range(lookback, len(df) - lookback):
+            current = df.iloc[i]
+
+            # Check for swing high
+            left_highs = df.iloc[i-lookback:i]['high']
+            right_highs = df.iloc[i+1:i+1+lookback]['high']
+
+            if current['high'] > left_highs.max() and current['high'] > right_highs.max():
+                swing_points.append({
+                    'time': int(current['timestamp'] // 1000),
+                    'price': float(current['high']),
+                    'type': 'high',
+                    'index': i
+                })
+
+            # Check for swing low
+            left_lows = df.iloc[i-lookback:i]['low']
+            right_lows = df.iloc[i+1:i+1+lookback]['low']
+
+            if current['low'] < left_lows.min() and current['low'] < right_lows.min():
+                swing_points.append({
+                    'time': int(current['timestamp'] // 1000),
+                    'price': float(current['low']),
+                    'type': 'low',
+                    'index': i
+                })
+
+        return swing_points
+
+    @staticmethod
+    def detect_trend(df: pd.DataFrame, lookback: int = 5, min_move_percent: float = 0.5) -> Dict[str, Any]:
+        """
+        Detect trend direction using Higher Highs/Higher Lows methodology.
+
+        Analyzes swing points to determine:
+        - Uptrend: Series of higher highs AND higher lows
+        - Downtrend: Series of lower highs AND lower lows
+        - Sideways: Mixed signals or insufficient data
+
+        Args:
+            df: DataFrame with OHLCV data
+            lookback: Swing point lookback window (default: 5)
+            min_move_percent: Minimum % move between swings (default: 0.5%)
+
+        Returns:
+            Dict with trend_type, trendline_points, swing_points, confidence, statistics
+
+        Raises:
+            ValueError: If DataFrame is invalid
+        """
+        # Get swing points
+        swing_points = TechnicalIndicators.detect_swing_points(df, lookback)
+
+        if len(swing_points) < 3:
+            return {
+                'trend_type': 'sideways',
+                'reason': 'insufficient_swings',
+                'trendline_points': [],
+                'swing_points': swing_points,
+                'swing_highs_count': 0,
+                'swing_lows_count': 0,
+                'higher_high_count': 0,
+                'lower_high_count': 0,
+                'higher_low_count': 0,
+                'lower_low_count': 0,
+                'confidence': 0.0
+            }
+
+        # Separate into highs and lows
+        swing_highs = [sp for sp in swing_points if sp['type'] == 'high']
+        swing_lows = [sp for sp in swing_points if sp['type'] == 'low']
+
+        # Sort by time
+        swing_highs.sort(key=lambda x: x['time'])
+        swing_lows.sort(key=lambda x: x['time'])
+
+        # Analyze highs for HH/LH pattern
+        higher_high_count = 0
+        lower_high_count = 0
+
+        for i in range(1, len(swing_highs)):
+            price_change_pct = ((swing_highs[i]['price'] - swing_highs[i-1]['price'])
+                                / swing_highs[i-1]['price'] * 100)
+
+            if abs(price_change_pct) >= min_move_percent:
+                if price_change_pct > 0:
+                    higher_high_count += 1
+                else:
+                    lower_high_count += 1
+
+        # Analyze lows for HL/LL pattern
+        higher_low_count = 0
+        lower_low_count = 0
+
+        for i in range(1, len(swing_lows)):
+            price_change_pct = ((swing_lows[i]['price'] - swing_lows[i-1]['price'])
+                                / swing_lows[i-1]['price'] * 100)
+
+            if abs(price_change_pct) >= min_move_percent:
+                if price_change_pct > 0:
+                    higher_low_count += 1
+                else:
+                    lower_low_count += 1
+
+        # Determine trend direction
+        trend_type = 'sideways'
+        trendline_points = []
+        confidence = 0.0
+
+        total_comparisons = (len(swing_highs) + len(swing_lows) - 2)
+
+        # Uptrend: HH + HL dominant
+        if higher_high_count > 0 and higher_low_count > 0:
+            if higher_high_count >= lower_high_count and higher_low_count >= lower_low_count:
+                trend_type = 'uptrend'
+                if total_comparisons > 0:
+                    confidence = (higher_high_count + higher_low_count) / total_comparisons
+
+                # Draw trendline connecting swing lows (support line)
+                if len(swing_lows) >= 2:
+                    first_low = swing_lows[0]
+                    last_low = swing_lows[-1]
+
+                    trendline_points = [
+                        {'time': first_low['time'], 'value': first_low['price']},
+                        {'time': last_low['time'], 'value': last_low['price']}
+                    ]
+
+                    # Extend line into future by 10%
+                    time_range = last_low['time'] - first_low['time']
+                    if time_range > 0:
+                        extension = int(time_range * 0.1)
+                        slope = (last_low['price'] - first_low['price']) / time_range
+                        extended_time = last_low['time'] + extension
+                        extended_value = last_low['price'] + (slope * extension)
+
+                        trendline_points.append({
+                            'time': extended_time,
+                            'value': float(extended_value)
+                        })
+
+        # Downtrend: LH + LL dominant
+        elif lower_high_count > 0 and lower_low_count > 0:
+            if lower_high_count >= higher_high_count and lower_low_count >= higher_low_count:
+                trend_type = 'downtrend'
+                if total_comparisons > 0:
+                    confidence = (lower_high_count + lower_low_count) / total_comparisons
+
+                # Draw trendline connecting swing highs (resistance line)
+                if len(swing_highs) >= 2:
+                    first_high = swing_highs[0]
+                    last_high = swing_highs[-1]
+
+                    trendline_points = [
+                        {'time': first_high['time'], 'value': first_high['price']},
+                        {'time': last_high['time'], 'value': last_high['price']}
+                    ]
+
+                    # Extend line into future by 10%
+                    time_range = last_high['time'] - first_high['time']
+                    if time_range > 0:
+                        extension = int(time_range * 0.1)
+                        slope = (last_high['price'] - first_high['price']) / time_range
+                        extended_time = last_high['time'] + extension
+                        extended_value = last_high['price'] + (slope * extension)
+
+                        trendline_points.append({
+                            'time': extended_time,
+                            'value': float(extended_value)
+                        })
+
+        return {
+            'trend_type': trend_type,
+            'trendline_points': trendline_points,
+            'swing_points': swing_points,
+            'swing_highs_count': len(swing_highs),
+            'swing_lows_count': len(swing_lows),
+            'higher_high_count': higher_high_count,
+            'lower_high_count': lower_high_count,
+            'higher_low_count': higher_low_count,
+            'lower_low_count': lower_low_count,
+            'confidence': float(confidence)
+        }
+
+    @staticmethod
     def detect_engulfing_patterns(df: pd.DataFrame) -> List[Dict[str, Any]]:
         """
         Detect Bullish and Bearish Engulfing candlestick patterns.
