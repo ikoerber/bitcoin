@@ -511,6 +511,78 @@ class OrderblocksView(APIView):
             )
 
 
+class EngulfingPatternsView(APIView):
+    """
+    GET /api/engulfing/<timeframe>/?limit=500
+
+    Detect and return Bullish/Bearish Engulfing candlestick patterns.
+
+    Parameters:
+        - timeframe: 15m, 1h, 4h, 1d
+        - limit: Number of candles to analyze (default: 500, max: 10000)
+
+    Returns:
+        JSON with list of detected engulfing patterns including type, price, and strength
+    """
+
+    def get(self, request, timeframe):
+        # Validate timeframe
+        if timeframe not in TIMEFRAME_MODELS:
+            return Response(
+                {'error': f'Invalid timeframe: {timeframe}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get parameters
+        try:
+            limit = int(request.GET.get('limit', 500))
+            if limit <= 0:
+                return Response(
+                    {'error': 'Limit must be a positive integer'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            limit = min(limit, 10000)
+        except ValueError:
+            return Response(
+                {'error': 'Invalid limit parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Fetch OHLCV data
+        model = TIMEFRAME_MODELS[timeframe]
+        queryset = model.objects.order_by('-timestamp')[:limit]
+
+        if not queryset.exists():
+            return Response(
+                {'error': 'No data available'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Convert to DataFrame
+        data = list(queryset.values('timestamp', 'open', 'high', 'low', 'close', 'volume'))
+        data.reverse()  # Chronological order
+        df = pd.DataFrame(data)
+
+        # Detect engulfing patterns
+        calc = TechnicalIndicators()
+
+        try:
+            patterns = calc.detect_engulfing_patterns(df)
+
+            return Response({
+                'timeframe': timeframe,
+                'count': len(patterns),
+                'patterns': patterns
+            })
+
+        except Exception as e:
+            logger.error(f"Error detecting engulfing patterns: {e}")
+            return Response(
+                {'error': f'Error detecting engulfing patterns: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 class DataSummaryView(APIView):
     """
     GET /api/summary/

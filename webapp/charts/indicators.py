@@ -509,3 +509,102 @@ class TechnicalIndicators:
                     orderblocks.append(ob)
 
         return orderblocks
+
+    @staticmethod
+    def detect_engulfing_patterns(df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """
+        Detect Bullish and Bearish Engulfing candlestick patterns.
+
+        Bullish Engulfing:
+        - Previous candle is bearish (red)
+        - Current candle is bullish (green)
+        - Current candle's body completely engulfs previous candle's body
+        - Signal: Potential bullish reversal
+
+        Bearish Engulfing:
+        - Previous candle is bullish (green)
+        - Current candle is bearish (red)
+        - Current candle's body completely engulfs previous candle's body
+        - Signal: Potential bearish reversal
+
+        Args:
+            df: DataFrame with OHLCV data
+
+        Returns:
+            List of engulfing patterns with time, type, and price levels
+        """
+        # Input validation
+        if df.empty:
+            raise ValueError("DataFrame is empty")
+
+        required_cols = ['timestamp', 'open', 'high', 'low', 'close']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"DataFrame missing required columns: {missing_cols}")
+
+        if len(df) < 2:
+            raise ValueError("Need at least 2 data points for engulfing pattern detection")
+
+        patterns = []
+
+        for i in range(1, len(df)):
+            prev = df.iloc[i-1]
+            curr = df.iloc[i]
+
+            # Determine candle types
+            prev_is_bearish = prev['close'] < prev['open']
+            prev_is_bullish = prev['close'] > prev['open']
+            curr_is_bearish = curr['close'] < curr['open']
+            curr_is_bullish = curr['close'] > curr['open']
+
+            # Get body boundaries
+            prev_body_top = max(prev['open'], prev['close'])
+            prev_body_bottom = min(prev['open'], prev['close'])
+            curr_body_top = max(curr['open'], curr['close'])
+            curr_body_bottom = min(curr['open'], curr['close'])
+
+            # Bullish Engulfing Pattern
+            if prev_is_bearish and curr_is_bullish:
+                # Check if current candle engulfs previous candle
+                if curr_body_bottom < prev_body_bottom and curr_body_top > prev_body_top:
+                    # Calculate pattern strength (how much bigger is the engulfing candle)
+                    prev_body_size = abs(prev['close'] - prev['open'])
+                    curr_body_size = abs(curr['close'] - curr['open'])
+                    strength = (curr_body_size / prev_body_size) if prev_body_size > 0 else 1.0
+
+                    pattern = {
+                        'time': int(curr['timestamp'] // 1000),
+                        'pattern_type': 'bullish_engulfing',
+                        'prev_candle_time': int(prev['timestamp'] // 1000),
+                        'price': float(curr['close']),
+                        'low': float(curr['low']),
+                        'high': float(curr['high']),
+                        'strength': float(strength),
+                        'prev_body_size': float(prev_body_size),
+                        'curr_body_size': float(curr_body_size)
+                    }
+                    patterns.append(pattern)
+
+            # Bearish Engulfing Pattern
+            elif prev_is_bullish and curr_is_bearish:
+                # Check if current candle engulfs previous candle
+                if curr_body_bottom < prev_body_bottom and curr_body_top > prev_body_top:
+                    # Calculate pattern strength
+                    prev_body_size = abs(prev['close'] - prev['open'])
+                    curr_body_size = abs(curr['close'] - curr['open'])
+                    strength = (curr_body_size / prev_body_size) if prev_body_size > 0 else 1.0
+
+                    pattern = {
+                        'time': int(curr['timestamp'] // 1000),
+                        'pattern_type': 'bearish_engulfing',
+                        'prev_candle_time': int(prev['timestamp'] // 1000),
+                        'price': float(curr['close']),
+                        'low': float(curr['low']),
+                        'high': float(curr['high']),
+                        'strength': float(strength),
+                        'prev_body_size': float(prev_body_size),
+                        'curr_body_size': float(curr_body_size)
+                    }
+                    patterns.append(pattern)
+
+        return patterns

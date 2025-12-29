@@ -20,6 +20,10 @@ let gapsEnabled = false;
 let gapType = 'regular';  // 'regular' or 'fvg'
 let gapSeries = [];  // Array to store gap rectangle series
 
+// Engulfing pattern visualization
+let engulfingEnabled = false;
+let engulfingMarkers = [];  // Array to store pattern markers
+
 /**
  * Initialize TradingView charts (main + volume)
  */
@@ -278,6 +282,11 @@ async function onTimeframeChange(timeframe) {
     // Reload gaps if enabled
     if (gapsEnabled) {
         await loadAndDisplayGaps();
+    }
+
+    // Reload engulfing patterns if enabled
+    if (engulfingEnabled) {
+        await loadAndDisplayEngulfing();
     }
 }
 
@@ -625,4 +634,91 @@ function clearGaps() {
 
     gapSeries = [];
     console.log('Cleared all gaps from chart');
+}
+
+/**
+ * Toggle engulfing pattern visualization on/off
+ */
+async function toggleEngulfing() {
+    engulfingEnabled = !engulfingEnabled;
+    const button = document.getElementById('engulfing-toggle');
+
+    if (engulfingEnabled) {
+        button.classList.add('active');
+        button.textContent = '🔄 Engulfing: AN';
+        await loadAndDisplayEngulfing();
+    } else {
+        button.classList.remove('active');
+        button.textContent = '🔄 Engulfing: AUS';
+        clearEngulfing();
+    }
+}
+
+/**
+ * Load engulfing patterns from API and display on chart
+ */
+async function loadAndDisplayEngulfing() {
+    try {
+        const limit = parseInt(document.getElementById('candle-limit').value) || 2000;
+        const response = await fetch(`/api/engulfing/${currentTimeframe}/?limit=${limit}`);
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log(`Loaded ${data.count} engulfing patterns for ${currentTimeframe}`);
+
+        // Display patterns as markers on chart
+        displayEngulfingMarkers(data.patterns);
+
+    } catch (error) {
+        console.error('Error loading engulfing patterns:', error);
+        alert(`Fehler beim Laden der Engulfing Patterns:\n${error.message}`);
+    }
+}
+
+/**
+ * Display engulfing patterns as markers on the candlestick chart
+ */
+function displayEngulfingMarkers(patterns) {
+    if (!candlestickSeries || !patterns || patterns.length === 0) {
+        console.log('No engulfing patterns to display');
+        return;
+    }
+
+    clearEngulfing();
+
+    // Convert patterns to TradingView markers format
+    const markers = patterns.map(pattern => {
+        const isBullish = pattern.pattern_type === 'bullish_engulfing';
+
+        return {
+            time: pattern.time,
+            position: isBullish ? 'belowBar' : 'aboveBar',
+            color: isBullish ? '#00c853' : '#ff5252',
+            shape: isBullish ? 'arrowUp' : 'arrowDown',
+            text: isBullish ? 'BE' : 'BE',  // Bullish/Bearish Engulfing
+            size: pattern.strength > 1.5 ? 2 : 1  // Bigger marker for stronger patterns
+        };
+    });
+
+    // Set markers on the candlestick series
+    candlestickSeries.setMarkers(markers);
+    engulfingMarkers = patterns;
+
+    console.log(`Displayed ${markers.length} engulfing pattern markers on chart`);
+}
+
+/**
+ * Clear all engulfing pattern markers from chart
+ */
+function clearEngulfing() {
+    if (!candlestickSeries) return;
+
+    // Clear markers by setting empty array
+    candlestickSeries.setMarkers([]);
+    engulfingMarkers = [];
+
+    console.log('Cleared all engulfing pattern markers from chart');
 }
