@@ -133,8 +133,10 @@ function initChart() {
  * Load and display chart data for a specific timeframe
  *
  * @param {string} timeframe - Timeframe to load ('15m', '1h', '4h', '1d')
+ * @param {number} limit - Number of candles to load
+ * @param {object} preserveVisibleRange - Previous visible range to restore (optional)
  */
-async function loadChartData(timeframe, limit = 1000) {
+async function loadChartData(timeframe, limit = 1000, preserveVisibleRange = null) {
     showLoading();
 
     try {
@@ -181,12 +183,20 @@ async function loadChartData(timeframe, limit = 1000) {
         // Update latest price
         await updateLatestPrice(timeframe);
 
-        // Fit content to visible area
+        // Restore previous visible range or fit content
         try {
-            chart.timeScale().fitContent();
-            volumeChart.timeScale().fitContent();
+            if (preserveVisibleRange) {
+                // Restore the previous visible range to keep chart position
+                chart.timeScale().setVisibleRange(preserveVisibleRange);
+                volumeChart.timeScale().setVisibleRange(preserveVisibleRange);
+                console.log('Restored visible range:', preserveVisibleRange);
+            } else {
+                // Only fit content if no range to preserve (initial load)
+                chart.timeScale().fitContent();
+                volumeChart.timeScale().fitContent();
+            }
         } catch (error) {
-            console.warn('Could not fit content:', error.message);
+            console.warn('Could not restore/fit visible range:', error.message);
         }
 
         hideLoading();
@@ -275,7 +285,16 @@ function hideLoading() {
 async function onTimeframeChange(timeframe) {
     currentTimeframe = timeframe;
     const limit = parseInt(document.getElementById('candle-limit').value);
-    await loadChartData(timeframe, limit);
+
+    // Save current visible time range to restore after loading new data
+    let visibleRange = null;
+    try {
+        visibleRange = chart.timeScale().getVisibleRange();
+    } catch (error) {
+        console.debug('Could not save visible range:', error);
+    }
+
+    await loadChartData(timeframe, limit, visibleRange);
 
     // Reload active indicators
     const indicators = getActiveIndicators();
