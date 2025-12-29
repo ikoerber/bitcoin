@@ -20,10 +20,6 @@ let gapsEnabled = false;
 let gapType = 'regular';  // 'regular' or 'fvg'
 let gapSeries = [];  // Array to store gap rectangle series
 
-// Orderblock visualization
-let orderblocksEnabled = false;
-let orderblockSeries = [];  // Array to store orderblock rectangle series
-
 /**
  * Initialize TradingView charts (main + volume)
  */
@@ -282,11 +278,6 @@ async function onTimeframeChange(timeframe) {
     // Reload gaps if enabled
     if (gapsEnabled) {
         await loadAndDisplayGaps();
-    }
-
-    // Reload orderblocks if enabled
-    if (orderblocksEnabled) {
-        await loadAndDisplayOrderblocks();
     }
 }
 
@@ -634,131 +625,4 @@ function clearGaps() {
 
     gapSeries = [];
     console.log('Cleared all gaps from chart');
-}
-
-/**
- * Toggle orderblock visualization on/off
- */
-async function toggleOrderblocks() {
-    orderblocksEnabled = !orderblocksEnabled;
-    const button = document.getElementById('orderblocks-toggle');
-
-    if (orderblocksEnabled) {
-        button.classList.add('active');
-        button.textContent = '📦 OB: AN';
-        await loadAndDisplayOrderblocks();
-    } else {
-        button.classList.remove('active');
-        button.textContent = '📦 OB: AUS';
-        clearOrderblocks();
-    }
-}
-
-/**
- * Load orderblock data from API and display on chart
- */
-async function loadAndDisplayOrderblocks() {
-    try {
-        const limit = parseInt(document.getElementById('candle-limit').value) || 2000;
-        const response = await fetch(`/api/orderblocks/${currentTimeframe}/?min_move=1.0&lookback=20&limit=${limit}`);
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log(`Loaded ${data.count} orderblocks for ${currentTimeframe}`);
-
-        // Display orderblocks on chart
-        displayOrderblocks(data.orderblocks);
-
-    } catch (error) {
-        console.error('Error loading orderblocks:', error);
-        alert(`Fehler beim Laden der Orderblocks:\n${error.message}`);
-    }
-}
-
-/**
- * Display orderblocks as colored rectangles on the chart
- */
-function displayOrderblocks(orderblocks) {
-    if (!chart || !orderblocks || orderblocks.length === 0) {
-        console.log('No orderblocks to display');
-        return;
-    }
-
-    clearOrderblocks();
-
-    orderblocks.forEach((ob) => {
-        // Determine color based on type and mitigation status
-        let lineColor;
-        if (ob.mitigated) {
-            // Mitigated orderblocks: semi-transparent gray
-            lineColor = 'rgba(128, 128, 128, 0.4)';
-        } else {
-            // Active orderblocks: colored by type
-            if (ob.ob_type === 'bullish') {
-                lineColor = 'rgba(0, 200, 83, 0.6)';  // Green
-            } else {
-                lineColor = 'rgba(255, 82, 82, 0.6)'; // Red
-            }
-        }
-
-        // Create horizontal lines for the orderblock zone
-        const topLine = chart.addLineSeries({
-            color: lineColor,
-            lineWidth: 2,
-            lineStyle: ob.mitigated ? 1 : 0,  // Dashed if mitigated
-            crosshairMarkerVisible: false,
-            lastValueVisible: false,
-            priceLineVisible: false,
-        });
-
-        const bottomLine = chart.addLineSeries({
-            color: lineColor,
-            lineWidth: 2,
-            lineStyle: ob.mitigated ? 1 : 0,
-            crosshairMarkerVisible: false,
-            lastValueVisible: false,
-            priceLineVisible: false,
-        });
-
-        // Extend the orderblock into the future for visibility
-        const extendTime = 100 * 3600;  // Extend 100 hours
-
-        // Set the horizontal lines
-        topLine.setData([
-            { time: ob.start_time, value: ob.ob_high },
-            { time: ob.start_time + extendTime, value: ob.ob_high }
-        ]);
-
-        bottomLine.setData([
-            { time: ob.start_time, value: ob.ob_low },
-            { time: ob.start_time + extendTime, value: ob.ob_low }
-        ]);
-
-        // Store references for later removal
-        orderblockSeries.push({ topLine, bottomLine, ob });
-    });
-
-    console.log(`Displayed ${orderblockSeries.length} orderblocks on chart`);
-}
-
-/**
- * Clear all orderblock visualizations from chart
- */
-function clearOrderblocks() {
-    if (!chart) return;
-
-    orderblockSeries.forEach(({ topLine, bottomLine }) => {
-        try {
-            chart.removeSeries(topLine);
-            chart.removeSeries(bottomLine);
-        } catch (error) {
-            console.debug('Error removing orderblock series:', error);
-        }
-    });
-
-    orderblockSeries = [];
-    console.log('Cleared all orderblocks from chart');
 }
