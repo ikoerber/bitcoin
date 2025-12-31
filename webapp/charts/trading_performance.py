@@ -88,6 +88,53 @@ class TradingPerformanceAnalyzer:
 
         return response.json()
 
+    def get_account_balances(self) -> Dict[str, Any]:
+        """
+        Get current account balances for BTC, EUR, and BNB.
+
+        Returns:
+            Dictionary with balance information:
+            {
+                'BTC': {'free': 0.05, 'locked': 0.01, 'total': 0.06},
+                'EUR': {'free': 1000.0, 'locked': 0.0, 'total': 1000.0},
+                'BNB': {'free': 0.5, 'locked': 0.0, 'total': 0.5},
+                'timestamp': 1640000000000,
+                'datetime': '2025-12-31 12:00:00'
+            }
+        """
+        try:
+            # Fetch all balances
+            balance = self.exchange.fetch_balance()
+
+            # Extract BTC, EUR, BNB
+            result = {}
+            for currency in ['BTC', 'EUR', 'BNB']:
+                if currency in balance:
+                    result[currency] = {
+                        'free': float(balance[currency]['free']),
+                        'locked': float(balance[currency]['used']),  # 'used' means locked in orders
+                        'total': float(balance[currency]['total'])
+                    }
+                else:
+                    result[currency] = {
+                        'free': 0.0,
+                        'locked': 0.0,
+                        'total': 0.0
+                    }
+
+            # Add timestamp
+            now = datetime.now()
+            result['timestamp'] = int(now.timestamp() * 1000)
+            result['datetime'] = now.strftime('%Y-%m-%d %H:%M:%S')
+
+            logger.info(f"Account balances: BTC={result['BTC']['total']:.8f}, EUR={result['EUR']['total']:.2f}, BNB={result['BNB']['total']:.8f}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error fetching account balances: {e}", exc_info=True)
+            raise
+
     def get_current_bnb_eur_price(self) -> float:
         """
         Get current BNB/EUR price from Binance.

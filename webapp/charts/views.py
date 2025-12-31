@@ -1000,3 +1000,69 @@ class SyncOpenOrdersView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class AccountBalanceView(APIView):
+    """
+    API endpoint to get current account balances for BTC, EUR, and BNB.
+
+    GET /api/account-balance/
+        Fetches current balances from Binance account.
+
+    Returns:
+        JSON with account balances:
+        {
+            'BTC': {'free': 0.05, 'locked': 0.01, 'total': 0.06},
+            'EUR': {'free': 1000.0, 'locked': 0.0, 'total': 1000.0},
+            'BNB': {'free': 0.5, 'locked': 0.0, 'total': 0.5},
+            'timestamp': 1640000000000,
+            'datetime': '2025-12-31 12:00:00'
+        }
+
+    Requires:
+        - BINANCE_API_KEY and BINANCE_API_SECRET in environment variables
+        - Read-only API permissions
+    """
+
+    def get(self, request):
+        from django.conf import settings
+
+        # Check if API keys are configured
+        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
+            return Response(
+                {
+                    'error': 'Binance API keys not configured',
+                    'message': 'Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables in .env file'
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        try:
+            # Initialize analyzer
+            analyzer = TradingPerformanceAnalyzer()
+
+            # Get account balances
+            logger.info("Fetching account balances")
+            balances = analyzer.get_account_balances()
+
+            logger.info(f"Account balances retrieved: {balances}")
+
+            return Response(balances)
+
+        except ValueError as e:
+            return Response(
+                {
+                    'error': 'Configuration error',
+                    'message': str(e)
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except Exception as e:
+            logger.error(f"Error fetching account balances: {e}", exc_info=True)
+            return Response(
+                {
+                    'error': 'Error fetching account balances',
+                    'message': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

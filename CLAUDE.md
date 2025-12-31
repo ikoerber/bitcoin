@@ -30,10 +30,27 @@ The system manages four parallel data streams for different trading styles:
 | 1d | btc_eur_1d | Long-term bias, investment decisions |
 
 ### Database Schema (SQLite)
+
+#### OHLCV Data Tables (4 timeframes)
 Each timeframe table contains:
 - `timestamp` (INTEGER, Primary Key): Unix timestamp
 - `open`, `high`, `low`, `close`, `volume` (REAL): OHLCV data
 - `datum` (TEXT): Human-readable datetime
+
+#### Trading Data Tables (NEW)
+- **btc_eur_trades**: Executed buy/sell trades
+  - `trade_id`, `order_id`, `symbol`, `timestamp`, `datetime`
+  - `side` (buy/sell), `price`, `amount`, `cost`
+  - `fee_cost`, `fee_currency`, `is_maker`
+
+- **asset_transactions**: Deposits, withdrawals, converts, transfers
+  - `transaction_id`, `transaction_type`, `timestamp`, `datetime`
+  - `currency`, `amount`, `from_currency`, `to_currency`
+  - `fee`, `network`, `address`, `tx_id`
+
+- **open_orders**: Currently open limit orders
+  - `order_id`, `symbol`, `timestamp`, `datetime`
+  - `type`, `side`, `price`, `amount`, `filled`, `remaining`
 
 ## Dependencies
 
@@ -102,6 +119,8 @@ python manage.py runserver
 ```
 
 ### REST API Endpoints (Webapp)
+
+#### Chart & Market Data
 - `GET /` - Interactive trading dashboard
 - `GET /api/ohlcv/<timeframe>/` - OHLCV candlestick data
 - `GET /api/latest-price/<timeframe>/` - Latest price with % change
@@ -110,6 +129,13 @@ python manage.py runserver
 - `GET /api/engulfing/<timeframe>/` - Bullish/Bearish engulfing candlestick patterns
 - `GET /api/summary/` - Database summary for all timeframes
 - `POST /api/update-database/` - Trigger database update from Binance (web-based)
+
+#### Trading Data Synchronization (NEW)
+- `GET /api/sync-trades/` - Sync executed trades from Binance to database
+- `GET /api/sync-asset-history/` - Sync deposits, withdrawals, converts to database
+- `GET /api/sync-open-orders/` - Sync currently open limit orders to database
+
+#### Performance Analysis
 - `GET /api/trading-performance/` - Personal trading performance analysis (requires API keys)
 
 Parameters:
@@ -118,6 +144,8 @@ Parameters:
 - `indicator`: rsi, sma, ema, bb
 - `period`: Indicator period (14 for RSI, 20 for others)
 - `days`: Trading performance lookback period (1-365, default: 90)
+- `symbol`: Trading pair (default: BTC/EUR)
+- `full_sync`: Force full resync (true/false, default: false)
 
 ## Development Notes
 
@@ -210,14 +238,20 @@ Parameters:
 - ✅ **Query Optimization**: ORDER BY -timestamp for fetching latest data first
 - See `IMPROVEMENTS.md` for complete changelog and implementation details
 
+### Completed Features ✅
+- ✅ **Technical Indicators**: RSI, SMA, EMA, Bollinger Bands
+- ✅ **Web-based Database Update**: Fetch latest data from dashboard
+- ✅ **Security Hardening**: Production configuration, environment variables
+- ✅ **Candlestick Patterns**: Bullish/Bearish Engulfing detection
+- ✅ **Trend Analysis**: Higher Highs/Higher Lows (Smart Money Concepts)
+- ✅ **Trading Performance**: FIFO P&L, win-rate, ROI calculations
+- ✅ **Unit Tests**: 24+ tests for trading performance backend
+- ✅ **Trade Synchronization**: Store all executed trades in database
+- ✅ **Asset History Tracking**: Deposits, withdrawals, converts
+- ✅ **Open Orders Management**: Track current limit orders
+- ✅ **Day Analysis Mode**: 2-day chart view with auto-fit price scale
+
 ### Future Development Areas
-- ~~Technical indicators (RSI, MA, Bollinger Bands) implementation~~ ✅ Completed
-- ~~Web-based database update functionality~~ ✅ Completed
-- ~~Security hardening and production configuration~~ ✅ Completed
-- ~~Candlestick pattern detection (Engulfing)~~ ✅ Completed
-- ~~Trend analysis (Higher Highs/Higher Lows)~~ ✅ Completed
-- ~~Trading performance analysis with Binance API~~ ✅ Completed
-- ~~Unit tests for trading performance backend~~ ✅ Completed
 - Frontend dashboard for trading performance visualization
 - Alert system for price pattern notifications
 - Backtesting framework for strategy validation
@@ -227,6 +261,8 @@ Parameters:
 - WebSocket integration for real-time updates
 - Multi-asset support (other crypto pairs)
 - Unit tests for CLI tools
+- Portfolio analysis combining all data sources
+- Tax reporting exports
 
 ## Project Structure
 
