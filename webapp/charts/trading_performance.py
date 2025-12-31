@@ -13,6 +13,10 @@ from django.conf import settings
 from django.utils import timezone
 import logging
 import sqlite3
+import requests
+import hashlib
+import hmac
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +49,44 @@ class TradingPerformanceAnalyzer:
         })
 
         logger.info("Trading Performance Analyzer initialized with Binance API")
+
+    def _binance_request(self, endpoint: str, params: dict = None) -> dict:
+        """
+        Make authenticated request to Binance API.
+
+        Args:
+            endpoint: API endpoint (e.g., '/sapi/v1/fiat/orders')
+            params: Query parameters
+
+        Returns:
+            API response as dictionary
+        """
+        if params is None:
+            params = {}
+
+        base_url = 'https://api.binance.com'
+        timestamp = int(time.time() * 1000)
+        params['timestamp'] = timestamp
+
+        # Create signature
+        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+        signature = hmac.new(
+            settings.BINANCE_API_SECRET.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        params['signature'] = signature
+
+        # Make request
+        headers = {
+            'X-MBX-APIKEY': settings.BINANCE_API_KEY
+        }
+
+        url = f"{base_url}{endpoint}"
+        response = requests.get(url, params=params, headers=headers, timeout=30)
+        response.raise_for_status()
+
+        return response.json()
 
     def get_current_bnb_eur_price(self) -> float:
         """
@@ -453,13 +495,195 @@ class TradingPerformanceAnalyzer:
             except Exception as e:
                 logger.error(f"Error fetching withdrawals: {e}")
 
+            # 3. Sync Fiat Deposits/Withdrawals (EUR, USD, etc.)
+            try:
+                logger.info("Fetching fiat transaction history...")
+                fiat_params = {
+                    'transactionType': '0',  # 0=deposit, 1=withdrawal
+                    'beginTime': since_timestamp_ms,
+                    'endTime': int(datetime.now().timestamp() * 1000)
+                }
+
+                # Fetch fiat deposits
+                fiat_deposits = self._binance_request('/sapi/v1/fiat/orders', fiat_params)
+                logger.info(f"Fetched {len(fiat_deposits.get('data', []))} fiat deposits")
+
+                for fiat_tx in fiat_deposits.get('data', []):
+                    if fiat_tx.get('status') != 'Successful':
+                        continue
+
+                    try:
+                        tx_id = f"fiat_deposit:{fiat_tx['orderNo']}"
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO asset_transactions (
+                                transaction_id, transaction_type, timestamp, datetime,
+                                status, currency, amount, fee, fee_currency
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            tx_id,
+                            'deposit',
+                            int(fiat_tx['createTime']),
+                            datetime.fromtimestamp(int(fiat_tx['createTime']) / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                            'success',
+                            fiat_tx.get('fiatCurrency', 'EUR'),
+                            float(fiat_tx.get('amount', 0)),
+                            float(fiat_tx.get('totalFee', 0)),
+                            fiat_tx.get('fiatCurrency', 'EUR')
+                        ))
+
+                        if cursor.rowcount > 0:
+                            stats['deposits_synced'] += 1
+
+                    except Exception as e:
+                        logger.warning(f"Failed to insert fiat deposit {fiat_tx.get('orderNo')}: {e}")
+                        continue
+
+                # Fetch fiat withdrawals
+                fiat_params['transactionType'] = '1'
+                fiat_withdrawals = self._binance_request('/sapi/v1/fiat/orders', fiat_params)
+                logger.info(f"Fetched {len(fiat_withdrawals.get('data', []))} fiat withdrawals")
+
+                for fiat_tx in fiat_withdrawals.get('data', []):
+                    if fiat_tx.get('status') != 'Successful':
+                        continue
+
+                    try:
+                        tx_id = f"fiat_withdrawal:{fiat_tx['orderNo']}"
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO asset_transactions (
+                                transaction_id, transaction_type, timestamp, datetime,
+                                status, currency, amount, fee, fee_currency
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            tx_id,
+                            'withdrawal',
+                            int(fiat_tx['createTime']),
+                            datetime.fromtimestamp(int(fiat_tx['createTime']) / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                            'success',
+                            fiat_tx.get('fiatCurrency', 'EUR'),
+                            float(fiat_tx.get('amount', 0)),
+                            float(fiat_tx.get('totalFee', 0)),
+                            fiat_tx.get('fiatCurrency', 'EUR')
+                        ))
+
+                        if cursor.rowcount > 0:
+                            stats['withdrawals_synced'] += 1
+
+                    except Exception as e:
+                        logger.warning(f"Failed to insert fiat withdrawal {fiat_tx.get('orderNo')}: {e}")
+                        continue
+
+            except Exception as e:
+                logger.error(f"Error fetching fiat transactions: {e}")
+
+            # 4. Sync Converts (Binance Convert)
+            try:
+                logger.info("Fetching convert history...")
+                convert_params = {
+                    'startTime': since_timestamp_ms,
+                    'endTime': int(datetime.now().timestamp() * 1000),
+                    'limit': 100
+                }
+
+                converts = self._binance_request('/sapi/v1/convert/tradeFlow', convert_params)
+                logger.info(f"Fetched {len(converts.get('list', []))} converts")
+
+                for convert in converts.get('list', []):
+                    try:
+                        tx_id = f"convert:{convert['quoteId']}"
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO asset_transactions (
+                                transaction_id, transaction_type, timestamp, datetime,
+                                status, currency, amount,
+                                from_currency, from_amount, to_currency, fee, fee_currency
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            tx_id,
+                            'convert',
+                            int(convert['createTime']),
+                            datetime.fromtimestamp(int(convert['createTime']) / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                            'success',
+                            convert['toAsset'],  # target currency
+                            float(convert['toAmount']),  # target amount
+                            convert['fromAsset'],  # source currency
+                            float(convert['fromAmount']),  # source amount
+                            convert['toAsset'],  # to currency (same as currency)
+                            0,  # Convert has no explicit fee
+                            None
+                        ))
+
+                        if cursor.rowcount > 0:
+                            stats['converts_synced'] += 1
+
+                    except Exception as e:
+                        logger.warning(f"Failed to insert convert {convert.get('quoteId')}: {e}")
+                        continue
+
+            except Exception as e:
+                logger.error(f"Error fetching converts: {e}")
+
+            # 5. Sync Transfers (Universal Transfer)
+            try:
+                logger.info("Fetching transfer history...")
+                transfer_params = {
+                    'type': 'MAIN_UMFUTURE',  # All transfer types
+                    'startTime': since_timestamp_ms,
+                    'endTime': int(datetime.now().timestamp() * 1000)
+                }
+
+                # Note: Binance has many transfer types. We'll try to fetch the common ones
+                transfer_types = [
+                    'MAIN_FUNDING',  # Spot -> Funding
+                    'FUNDING_MAIN',  # Funding -> Spot
+                    'MAIN_MARGIN',   # Spot -> Margin
+                    'MARGIN_MAIN',   # Margin -> Spot
+                ]
+
+                for transfer_type in transfer_types:
+                    try:
+                        transfer_params['type'] = transfer_type
+                        transfers = self._binance_request('/sapi/v1/asset/transfer', transfer_params)
+
+                        for transfer in transfers.get('rows', []):
+                            try:
+                                tx_id = f"transfer:{transfer['tranId']}"
+                                cursor.execute("""
+                                    INSERT OR IGNORE INTO asset_transactions (
+                                        transaction_id, transaction_type, timestamp, datetime,
+                                        status, currency, amount
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                                """, (
+                                    tx_id,
+                                    'transfer',
+                                    int(transfer['timestamp']),
+                                    datetime.fromtimestamp(int(transfer['timestamp']) / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                                    'success',
+                                    transfer['asset'],
+                                    float(transfer['amount'])
+                                ))
+
+                                if cursor.rowcount > 0:
+                                    stats['transfers_synced'] = stats.get('transfers_synced', 0) + 1
+
+                            except Exception as e:
+                                logger.warning(f"Failed to insert transfer {transfer.get('tranId')}: {e}")
+                                continue
+
+                    except Exception as e:
+                        logger.debug(f"No transfers found for type {transfer_type}: {e}")
+                        continue
+
+            except Exception as e:
+                logger.error(f"Error fetching transfers: {e}")
+
             conn.commit()
 
             # Calculate total
             stats['total_synced'] = (
                 stats['deposits_synced'] +
                 stats['withdrawals_synced'] +
-                stats['converts_synced']
+                stats['converts_synced'] +
+                stats.get('transfers_synced', 0)
             )
 
             # Get final counts
