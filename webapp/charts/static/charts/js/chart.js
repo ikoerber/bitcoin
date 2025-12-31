@@ -11,9 +11,6 @@ let volumeSeries = null;
 let volumeChart = null;
 let currentTimeframe = '1h';
 let autoRefreshInterval = null;
-let isLoadingMore = false;
-let allDataLoaded = false;
-let currentDataLength = 0;
 
 // Fixed candle limit - always use maximum
 const CANDLE_LIMIT = 10000;
@@ -165,10 +162,6 @@ async function loadChartData(timeframe, limit = 1000, preserveVisibleRange = nul
         }
 
         console.log('First candle:', response.data[0]);
-
-        // Track current data length
-        currentDataLength = response.data.length;
-        allDataLoaded = response.data.length < limit;
 
         // Update candlestick series
         candlestickSeries.setData(response.data);
@@ -437,7 +430,27 @@ function initEventListeners() {
 }
 
 /**
- * Update database from Binance (with confirmation)
+ * Core database update function - fetches latest data from Binance
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+async function fetchDatabaseUpdate() {
+    try {
+        const response = await fetch('/api/update-database/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+
+        const data = await response.json();
+        return { success: data.success, data };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Update database from Binance (with confirmation and UI feedback)
  */
 async function updateDatabase() {
     const button = document.getElementById('update-db-btn');
@@ -448,21 +461,15 @@ async function updateDatabase() {
             button.disabled = true;
             button.textContent = '⏳ Lade Daten...';
 
-            const response = await fetch('/api/update-database/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            });
+            const result = await fetchDatabaseUpdate();
 
-            const data = await response.json();
-
-            if (data.success) {
+            if (result.success) {
                 alert('✅ Datenbank erfolgreich aktualisiert!\n\nDie Seite wird neu geladen...');
                 location.reload();
             } else {
-                console.error('Update failed:', data);
-                alert(`❌ Fehler beim Aktualisieren:\n\n${data.error || data.message}\n\nDetails in der Konsole (F12)`);
+                console.error('Update failed:', result.data);
+                const errorMsg = result.error || result.data?.error || result.data?.message || 'Unknown error';
+                alert(`❌ Fehler beim Aktualisieren:\n\n${errorMsg}\n\nDetails in der Konsole (F12)`);
             }
         } catch (error) {
             console.error('Error updating database:', error);
@@ -477,29 +484,18 @@ async function updateDatabase() {
 /**
  * Update database from Binance silently (no confirmation, no reload popup)
  * Used internally by day analysis mode
+ * @returns {Promise<boolean>} True if update succeeded
  */
 async function updateDatabaseSilent() {
-    try {
-        console.log('Fetching latest data from Binance...');
+    console.log('Fetching latest data from Binance...');
 
-        const response = await fetch('/api/update-database/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
+    const result = await fetchDatabaseUpdate();
 
-        const data = await response.json();
-
-        if (data.success) {
-            console.log('✅ Database updated successfully');
-            return true;
-        } else {
-            console.error('Database update failed:', data);
-            return false;
-        }
-    } catch (error) {
-        console.error('Error updating database silently:', error);
+    if (result.success) {
+        console.log('✅ Database updated successfully');
+        return true;
+    } else {
+        console.error('Database update failed:', result.data || result.error);
         return false;
     }
 }

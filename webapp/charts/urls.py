@@ -15,7 +15,6 @@ urlpatterns = [
     path('api/ohlcv/<str:timeframe>/', views.OHLCVDataView.as_view(), name='ohlcv'),
     path('api/latest-price/<str:timeframe>/', views.LatestPriceView.as_view(), name='latest-price'),
     path('api/indicators/<str:timeframe>/', views.IndicatorsView.as_view(), name='indicators'),
-    path('api/orderblocks/<str:timeframe>/', views.OrderblocksView.as_view(), name='orderblocks'),
     path('api/trend/<str:timeframe>/', views.TrendView.as_view(), name='trend'),
     path('api/engulfing/<str:timeframe>/', views.EngulfingPatternsView.as_view(), name='engulfing'),
     path('api/summary/', views.DataSummaryView.as_view(), name='summary'),
