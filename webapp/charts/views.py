@@ -848,3 +848,84 @@ class SyncTradesView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class SyncAssetHistoryView(APIView):
+    """
+    API endpoint to synchronize asset history (deposits, withdrawals, converts).
+
+    GET /api/sync-asset-history/
+        Syncs deposits, withdrawals, and converts from Binance API to database.
+        Only fetches successful transactions.
+
+    Query parameters:
+        - full_sync: Set to 'true' to force full resync from 1 year ago (default: false)
+
+    Returns:
+        JSON with sync statistics:
+        - deposits_synced: Number of new deposits added
+        - withdrawals_synced: Number of new withdrawals added
+        - converts_synced: Number of new converts added
+        - total_in_db: Total counts by transaction type
+
+    Requires:
+        - BINANCE_API_KEY and BINANCE_API_SECRET in environment variables
+        - Read-only API permissions
+    """
+
+    def get(self, request):
+        from django.conf import settings
+
+        # Check if API keys are configured
+        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
+            return Response(
+                {
+                    'error': 'Binance API keys not configured',
+                    'message': 'Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables in .env file'
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        # Get parameters
+        full_sync = request.GET.get('full_sync', 'false').lower() == 'true'
+
+        try:
+            # Initialize analyzer
+            analyzer = TradingPerformanceAnalyzer()
+
+            # Determine sync start date
+            since = None
+            if full_sync:
+                from datetime import datetime, timedelta
+                since = datetime.now() - timedelta(days=365)
+                logger.info(f"Full asset history sync requested: fetching since {since}")
+
+            # Sync asset history to database
+            logger.info("Starting asset history synchronization")
+            sync_result = analyzer.sync_asset_history_to_database(since=since)
+
+            logger.info(f"Asset history sync complete: {sync_result}")
+
+            return Response({
+                'status': 'success',
+                'sync_type': 'full' if full_sync else 'incremental',
+                **sync_result
+            })
+
+        except ValueError as e:
+            return Response(
+                {
+                    'error': 'Configuration error',
+                    'message': str(e)
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except Exception as e:
+            logger.error(f"Error syncing asset history: {e}", exc_info=True)
+            return Response(
+                {
+                    'error': 'Error syncing asset history',
+                    'message': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

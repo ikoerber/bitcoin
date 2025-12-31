@@ -208,3 +208,162 @@ class BTCEURTrade(models.Model):
     def datetime_str(self):
         """Human-readable datetime string"""
         return self.datetime.strftime('%Y-%m-%d %H:%M:%S')
+
+
+class AssetTransaction(models.Model):
+    """
+    Model for storing asset transactions (deposits, transfers, converts).
+
+    Tracks all asset movements including:
+    - Deposits (fiat, crypto)
+    - Transfers (internal Binance transfers)
+    - Converts (crypto-to-crypto conversions)
+    """
+
+    # Transaction types
+    TRANSACTION_TYPES = [
+        ('deposit', 'Deposit'),
+        ('withdrawal', 'Withdrawal'),
+        ('transfer', 'Transfer'),
+        ('convert', 'Convert'),
+    ]
+
+    # Status choices
+    STATUS_CHOICES = [
+        ('success', 'Success'),
+        ('pending', 'Pending'),
+        ('failed', 'Failed'),
+    ]
+
+    # Primary key: combination of type + Binance transaction ID
+    transaction_id = models.CharField(
+        max_length=100,
+        primary_key=True,
+        help_text="Unique transaction identifier (type:id)"
+    )
+
+    # Transaction details
+    transaction_type = models.CharField(
+        max_length=10,
+        choices=TRANSACTION_TYPES,
+        db_index=True,
+        help_text="Type of transaction"
+    )
+
+    timestamp = models.BigIntegerField(
+        db_index=True,
+        help_text="Transaction timestamp (milliseconds since epoch)"
+    )
+
+    datetime = models.DateTimeField(
+        db_index=True,
+        help_text="Human-readable datetime"
+    )
+
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default='success',
+        help_text="Transaction status"
+    )
+
+    # Asset information
+    currency = models.CharField(
+        max_length=10,
+        db_index=True,
+        help_text="Asset symbol (BTC, EUR, BNB, etc.)"
+    )
+
+    amount = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        help_text="Transaction amount"
+    )
+
+    # For converts: from/to currencies
+    from_currency = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        help_text="Source currency for converts"
+    )
+
+    to_currency = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        help_text="Target currency for converts"
+    )
+
+    from_amount = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        null=True,
+        blank=True,
+        help_text="Source amount for converts"
+    )
+
+    # Fees
+    fee = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        default=0,
+        help_text="Transaction fee"
+    )
+
+    fee_currency = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        help_text="Fee currency"
+    )
+
+    # Additional metadata
+    network = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Network used (for deposits/withdrawals)"
+    )
+
+    address = models.CharField(
+        max_length=200,
+        null=True,
+        blank=True,
+        help_text="Deposit/withdrawal address"
+    )
+
+    tx_id = models.CharField(
+        max_length=200,
+        null=True,
+        blank=True,
+        help_text="Blockchain transaction ID"
+    )
+
+    # Sync metadata
+    synced_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this transaction was synced from Binance API"
+    )
+
+    class Meta:
+        db_table = 'asset_transactions'
+        ordering = ['-timestamp']
+        verbose_name = 'Asset Transaction'
+        verbose_name_plural = 'Asset Transactions'
+        indexes = [
+            models.Index(fields=['-timestamp']),
+            models.Index(fields=['transaction_type', '-timestamp']),
+            models.Index(fields=['currency', '-timestamp']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        if self.transaction_type == 'convert':
+            return f"CONVERT {self.from_amount} {self.from_currency} → {self.amount} {self.to_currency} on {self.datetime}"
+        return f"{self.transaction_type.upper()} {self.amount} {self.currency} on {self.datetime}"
+
+    @property
+    def datetime_str(self):
+        """Human-readable datetime string"""
+        return self.datetime.strftime('%Y-%m-%d %H:%M:%S')

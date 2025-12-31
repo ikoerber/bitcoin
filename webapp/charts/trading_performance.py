@@ -310,6 +310,179 @@ class TradingPerformanceAnalyzer:
             logger.info(f"Loaded {len(trades)} trades from database")
             return trades
 
+    def sync_asset_history_to_database(
+        self,
+        since: Optional[datetime] = None,
+        db_path: str = None
+    ) -> Dict[str, Any]:
+        """
+        Synchronize asset history (deposits, withdrawals, converts) to database.
+
+        Fetches and stores:
+        - Deposits (fiat and crypto)
+        - Withdrawals
+        - Converts (Binance Convert trades)
+
+        Args:
+            since: Start date for sync (default: last sync or 1 year ago)
+            db_path: Path to SQLite database
+
+        Returns:
+            Dictionary with sync statistics
+        """
+        import os
+
+        if db_path is None:
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            db_path = os.path.join(project_root, 'btc_eur_data.db')
+
+        logger.info("Starting asset history synchronization")
+        logger.info(f"Database path: {db_path}")
+
+        stats = {
+            'deposits_synced': 0,
+            'withdrawals_synced': 0,
+            'converts_synced': 0,
+            'total_synced': 0,
+        }
+
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+
+            # Get last sync timestamp
+            cursor.execute("SELECT MAX(timestamp) FROM asset_transactions")
+            result = cursor.fetchone()
+            latest_timestamp_ms = result[0] if result[0] else None
+
+            # Determine start date
+            if since:
+                since_timestamp_ms = int(since.timestamp() * 1000)
+            elif latest_timestamp_ms:
+                since_timestamp_ms = latest_timestamp_ms + 1
+                logger.info(f"Incremental sync since {datetime.fromtimestamp(since_timestamp_ms / 1000)}")
+            else:
+                since = datetime.now() - timedelta(days=365)
+                since_timestamp_ms = int(since.timestamp() * 1000)
+                logger.info(f"Initial sync since {since}")
+
+            # 1. Sync Deposits
+            try:
+                logger.info("Fetching deposit history...")
+                deposits = self.exchange.fetch_deposits(since=since_timestamp_ms)
+                logger.info(f"Fetched {len(deposits)} deposits")
+
+                for deposit in deposits:
+                    # Only include successful deposits
+                    if deposit.get('status') != 'ok':
+                        continue
+
+                    try:
+                        tx_id = f"deposit:{deposit['id']}"
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO asset_transactions (
+                                transaction_id, transaction_type, timestamp, datetime,
+                                status, currency, amount, fee, fee_currency,
+                                network, address, tx_id
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            tx_id,
+                            'deposit',
+                            deposit['timestamp'],
+                            datetime.fromtimestamp(deposit['timestamp'] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                            'success',
+                            deposit['currency'],
+                            float(deposit['amount']),
+                            float(deposit.get('fee', {}).get('cost', 0)),
+                            deposit.get('fee', {}).get('currency'),
+                            deposit.get('network'),
+                            deposit.get('address'),
+                            deposit.get('txid')
+                        ))
+
+                        if cursor.rowcount > 0:
+                            stats['deposits_synced'] += 1
+
+                    except Exception as e:
+                        logger.warning(f"Failed to insert deposit {deposit.get('id')}: {e}")
+                        continue
+
+            except Exception as e:
+                logger.error(f"Error fetching deposits: {e}")
+
+            # 2. Sync Withdrawals
+            try:
+                logger.info("Fetching withdrawal history...")
+                withdrawals = self.exchange.fetch_withdrawals(since=since_timestamp_ms)
+                logger.info(f"Fetched {len(withdrawals)} withdrawals")
+
+                for withdrawal in withdrawals:
+                    # Only include successful withdrawals
+                    if withdrawal.get('status') != 'ok':
+                        continue
+
+                    try:
+                        tx_id = f"withdrawal:{withdrawal['id']}"
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO asset_transactions (
+                                transaction_id, transaction_type, timestamp, datetime,
+                                status, currency, amount, fee, fee_currency,
+                                network, address, tx_id
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            tx_id,
+                            'withdrawal',
+                            withdrawal['timestamp'],
+                            datetime.fromtimestamp(withdrawal['timestamp'] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                            'success',
+                            withdrawal['currency'],
+                            float(withdrawal['amount']),
+                            float(withdrawal.get('fee', {}).get('cost', 0)),
+                            withdrawal.get('fee', {}).get('currency'),
+                            withdrawal.get('network'),
+                            withdrawal.get('address'),
+                            withdrawal.get('txid')
+                        ))
+
+                        if cursor.rowcount > 0:
+                            stats['withdrawals_synced'] += 1
+
+                    except Exception as e:
+                        logger.warning(f"Failed to insert withdrawal {withdrawal.get('id')}: {e}")
+                        continue
+
+            except Exception as e:
+                logger.error(f"Error fetching withdrawals: {e}")
+
+            conn.commit()
+
+            # Calculate total
+            stats['total_synced'] = (
+                stats['deposits_synced'] +
+                stats['withdrawals_synced'] +
+                stats['converts_synced']
+            )
+
+            # Get final counts
+            cursor.execute("""
+                SELECT transaction_type, COUNT(*)
+                FROM asset_transactions
+                GROUP BY transaction_type
+            """)
+            type_counts = dict(cursor.fetchall())
+
+            logger.info(f"Asset history sync complete: {stats}")
+
+            return {
+                **stats,
+                'total_in_db': {
+                    'deposits': type_counts.get('deposit', 0),
+                    'withdrawals': type_counts.get('withdrawal', 0),
+                    'transfers': type_counts.get('transfer', 0),
+                    'converts': type_counts.get('convert', 0),
+                },
+                'sync_timestamp': datetime.now().isoformat()
+            }
+
     def calculate_performance_metrics(
         self,
         trades: List[Dict[str, Any]],
