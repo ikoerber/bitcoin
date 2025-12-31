@@ -18,11 +18,6 @@ let currentDataLength = 0;
 // Fixed candle limit - always use maximum
 const CANDLE_LIMIT = 10000;
 
-// Gap visualization
-let gapsEnabled = false;
-let gapType = 'regular';  // 'regular' or 'fvg'
-let gapSeries = [];  // Array to store gap rectangle series
-
 // Engulfing pattern visualization
 let engulfingEnabled = false;
 let engulfingMarkers = [];  // Array to store pattern markers
@@ -310,11 +305,6 @@ async function onTimeframeChange(timeframe) {
         }
     }
 
-    // Reload gaps if enabled
-    if (gapsEnabled) {
-        await loadAndDisplayGaps();
-    }
-
     // Reload engulfing patterns if enabled
     if (engulfingEnabled) {
         await loadAndDisplayEngulfing();
@@ -537,155 +527,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         alert('Fehler beim Initialisieren des Dashboards\n\nDetails: ' + error.message + '\n\nBitte öffne die Browser-Konsole (F12) für weitere Informationen.');
     }
 });
-
-/**
- * Toggle gap visualization on/off
- */
-async function toggleGaps() {
-    gapsEnabled = !gapsEnabled;
-    const button = document.getElementById('gaps-toggle');
-
-    if (gapsEnabled) {
-        button.classList.add('active');
-        button.textContent = '📊 Gaps: AN';
-        await loadAndDisplayGaps();
-    } else {
-        button.classList.remove('active');
-        button.textContent = '📊 Gaps: AUS';
-        clearGaps();
-    }
-}
-
-/**
- * Toggle between regular gaps and Fair Value Gaps
- */
-async function toggleGapType() {
-    const button = document.getElementById('gap-type-toggle');
-
-    if (gapType === 'regular') {
-        gapType = 'fvg';
-        button.textContent = 'FVG';
-        button.title = 'Fair Value Gaps (ICT)';
-    } else {
-        gapType = 'regular';
-        button.textContent = 'Regular';
-        button.title = 'Standard Price Gaps';
-    }
-
-    // Reload gaps if currently enabled
-    if (gapsEnabled) {
-        clearGaps();
-        await loadAndDisplayGaps();
-    }
-}
-
-/**
- * Load gap data from API and display on chart
- */
-async function loadAndDisplayGaps() {
-    try {
-        const limit = CANDLE_LIMIT;
-        const response = await fetch(`/api/gaps/${currentTimeframe}/?gap_type=${gapType}&min_gap=0.1&limit=${limit}`);
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log(`Loaded ${data.count} ${gapType} gaps for ${currentTimeframe}`);
-
-        // Display gaps on chart
-        displayGaps(data.gaps);
-
-    } catch (error) {
-        console.error('Error loading gaps:', error);
-        alert(`Fehler beim Laden der Gaps:\n${error.message}`);
-    }
-}
-
-/**
- * Display gaps as colored rectangles on the chart
- */
-function displayGaps(gaps) {
-    if (!chart || !gaps || gaps.length === 0) {
-        console.log('No gaps to display');
-        return;
-    }
-
-    clearGaps();
-
-    gaps.forEach((gap) => {
-        // Determine color based on gap type and filled status
-        let color;
-        if (gap.filled) {
-            // Filled gaps: semi-transparent gray
-            color = 'rgba(128, 128, 128, 0.15)';
-        } else {
-            // Unfilled gaps: colored by type
-            if (gap.gap_type === 'bullish' || gap.gap_type === 'bullish_fvg') {
-                color = 'rgba(38, 166, 154, 0.25)';  // Green/cyan
-            } else {
-                color = 'rgba(239, 83, 80, 0.25)';   // Red
-            }
-        }
-
-        // Create price line series for the gap rectangle
-        // Note: TradingView Lightweight Charts doesn't have native rectangle support
-        // We'll use horizontal lines at the top and bottom of the gap
-        const topLine = chart.addLineSeries({
-            color: color.replace('0.25', '0.6'),
-            lineWidth: 1,
-            lineStyle: gap.filled ? 1 : 0,  // Dashed if filled, solid if not
-            crosshairMarkerVisible: false,
-            lastValueVisible: false,
-            priceLineVisible: false,
-        });
-
-        const bottomLine = chart.addLineSeries({
-            color: color.replace('0.25', '0.6'),
-            lineWidth: 1,
-            lineStyle: gap.filled ? 1 : 0,
-            crosshairMarkerVisible: false,
-            lastValueVisible: false,
-            priceLineVisible: false,
-        });
-
-        // Set the horizontal lines
-        topLine.setData([
-            { time: gap.start_time, value: gap.gap_high },
-            { time: gap.end_time + 3600, value: gap.gap_high }  // Extend a bit
-        ]);
-
-        bottomLine.setData([
-            { time: gap.start_time, value: gap.gap_low },
-            { time: gap.end_time + 3600, value: gap.gap_low }
-        ]);
-
-        // Store references for later removal
-        gapSeries.push({ topLine, bottomLine, gap });
-    });
-
-    console.log(`Displayed ${gapSeries.length} gaps on chart`);
-}
-
-/**
- * Clear all gap visualizations from chart
- */
-function clearGaps() {
-    if (!chart) return;
-
-    gapSeries.forEach(({ topLine, bottomLine }) => {
-        try {
-            chart.removeSeries(topLine);
-            chart.removeSeries(bottomLine);
-        } catch (error) {
-            console.debug('Error removing gap series:', error);
-        }
-    });
-
-    gapSeries = [];
-    console.log('Cleared all gaps from chart');
-}
 
 /**
  * Toggle engulfing pattern visualization on/off
