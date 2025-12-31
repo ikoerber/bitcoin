@@ -13,6 +13,7 @@ let currentDays = 30;
 let balanceData = null;
 let totalChart = null;
 let assetsChart = null;
+let sankeyChart = null;
 
 // DOM Elements
 const loadingMessage = document.getElementById('loading-message');
@@ -31,6 +32,7 @@ const bnbBalanceEl = document.getElementById('bnb-balance');
 // Chart elements
 const totalChartCanvas = document.getElementById('total-chart');
 const assetsChartCanvas = document.getElementById('assets-chart');
+const sankeyChartCanvas = document.getElementById('sankey-chart');
 const balanceTableBody = document.getElementById('balance-table-body');
 
 /**
@@ -128,6 +130,9 @@ function renderCharts() {
     }
     if (assetsChart) {
         assetsChart.destroy();
+    }
+    if (sankeyChart) {
+        sankeyChart.destroy();
     }
 
     // Format dates for display
@@ -276,6 +281,89 @@ function renderCharts() {
             }
         }
     });
+
+    // 3. Sankey Diagram - Money Flows
+    if (balanceData.flows) {
+        const flows = balanceData.flows;
+        const sankeyData = [];
+
+        // Build Sankey data structure: [{from, to, flow}]
+        if (flows.deposits_to_eur > 0) {
+            sankeyData.push({from: 'Einzahlungen', to: 'EUR Balance', flow: flows.deposits_to_eur});
+        }
+        if (flows.eur_to_btc > 0) {
+            sankeyData.push({from: 'EUR Balance', to: 'BTC Käufe', flow: flows.eur_to_btc});
+        }
+        if (flows.btc_to_eur > 0) {
+            sankeyData.push({from: 'BTC Verkäufe', to: 'EUR Balance', flow: flows.btc_to_eur});
+        }
+        if (flows.eur_to_bnb > 0) {
+            sankeyData.push({from: 'EUR Balance', to: 'BNB Converts', flow: flows.eur_to_bnb});
+        }
+        if (flows.bnb_to_fees > 0) {
+            sankeyData.push({from: 'BNB Balance', to: 'Handelsgebühren', flow: flows.bnb_to_fees});
+        }
+        if (flows.eur_to_withdrawals > 0) {
+            sankeyData.push({from: 'EUR Balance', to: 'Auszahlungen', flow: flows.eur_to_withdrawals});
+        }
+
+        sankeyChart = new Chart(sankeyChartCanvas, {
+            type: 'sankey',
+            data: {
+                datasets: [{
+                    data: sankeyData,
+                    colorFrom: (c) => {
+                        // Color based on source node
+                        const from = c.dataset.data[c.dataIndex].from;
+                        if (from.includes('Einzahlung')) return 'rgba(76, 175, 80, 0.7)';
+                        if (from.includes('EUR')) return 'rgba(33, 150, 243, 0.7)';
+                        if (from.includes('BTC')) return 'rgba(255, 152, 0, 0.7)';
+                        if (from.includes('BNB')) return 'rgba(156, 39, 176, 0.7)';
+                        return 'rgba(100, 100, 100, 0.7)';
+                    },
+                    colorTo: (c) => {
+                        // Color based on target node
+                        const to = c.dataset.data[c.dataIndex].to;
+                        if (to.includes('EUR')) return 'rgba(33, 150, 243, 0.7)';
+                        if (to.includes('BTC')) return 'rgba(255, 152, 0, 0.7)';
+                        if (to.includes('BNB')) return 'rgba(156, 39, 176, 0.7)';
+                        if (to.includes('Gebühr')) return 'rgba(244, 67, 54, 0.7)';
+                        if (to.includes('Auszahlung')) return 'rgba(244, 67, 54, 0.7)';
+                        return 'rgba(100, 100, 100, 0.7)';
+                    },
+                    colorMode: 'gradient',
+                    labels: {
+                        color: '#d1d4dc',
+                        font: { size: 12 }
+                    }
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: '#131722',
+                        titleColor: '#d1d4dc',
+                        bodyColor: '#d1d4dc',
+                        borderColor: '#2a2e39',
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(context) {
+                                const flow = context.raw;
+                                return `${flow.from} → ${flow.to}: €${flow.flow.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        console.log('[BalanceHistory] Sankey chart rendered with', sankeyData.length, 'flows');
+    }
 
     console.log('[BalanceHistory] Charts rendered');
 }

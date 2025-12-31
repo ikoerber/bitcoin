@@ -1468,6 +1468,81 @@ class BalanceHistoryView(APIView):
 
                 logger.info(f"Balance history: {len(dates)} days, total EUR: {total_value_eur[-1] if total_value_eur else 0:.2f}")
 
+                # 4. Calculate flow data for Sankey diagram
+                flows = {
+                    'deposits_to_eur': 0,
+                    'eur_to_btc': 0,
+                    'btc_to_eur': 0,
+                    'eur_to_bnb': 0,
+                    'bnb_to_fees': 0,
+                    'eur_to_withdrawals': 0
+                }
+
+                # Deposits
+                cursor.execute("""
+                    SELECT SUM(amount) as total
+                    FROM asset_transactions
+                    WHERE transaction_type = 'deposit'
+                      AND currency = 'EUR'
+                      AND date(datetime) >= ?
+                """, (start_date.isoformat(),))
+                result = cursor.fetchone()
+                flows['deposits_to_eur'] = round(float(result['total'] or 0), 2)
+
+                # EUR to BTC (buys)
+                cursor.execute("""
+                    SELECT SUM(cost) as total
+                    FROM btc_eur_trades
+                    WHERE side = 'buy'
+                      AND date(datetime) >= ?
+                """, (start_date.isoformat(),))
+                result = cursor.fetchone()
+                flows['eur_to_btc'] = round(float(result['total'] or 0), 2)
+
+                # BTC to EUR (sells)
+                cursor.execute("""
+                    SELECT SUM(cost) as total
+                    FROM btc_eur_trades
+                    WHERE side = 'sell'
+                      AND date(datetime) >= ?
+                """, (start_date.isoformat(),))
+                result = cursor.fetchone()
+                flows['btc_to_eur'] = round(float(result['total'] or 0), 2)
+
+                # BNB fees (converted to EUR)
+                cursor.execute("""
+                    SELECT SUM(fee_cost) as total
+                    FROM btc_eur_trades
+                    WHERE fee_currency = 'BNB'
+                      AND date(datetime) >= ?
+                """, (start_date.isoformat(),))
+                result = cursor.fetchone()
+                bnb_fees_bnb = float(result['total'] or 0)
+                flows['bnb_to_fees'] = round(bnb_fees_bnb * bnb_eur_price, 2)
+
+                # Converts EUR to BNB
+                cursor.execute("""
+                    SELECT SUM(from_amount) as total
+                    FROM asset_transactions
+                    WHERE transaction_type = 'convert'
+                      AND from_currency = 'EUR'
+                      AND to_currency = 'BNB'
+                      AND date(datetime) >= ?
+                """, (start_date.isoformat(),))
+                result = cursor.fetchone()
+                flows['eur_to_bnb'] = round(float(result['total'] or 0), 2)
+
+                # Withdrawals
+                cursor.execute("""
+                    SELECT SUM(amount) as total
+                    FROM asset_transactions
+                    WHERE transaction_type = 'withdrawal'
+                      AND currency = 'EUR'
+                      AND date(datetime) >= ?
+                """, (start_date.isoformat(),))
+                result = cursor.fetchone()
+                flows['eur_to_withdrawals'] = round(float(result['total'] or 0), 2)
+
                 return Response({
                     'dates': dates,
                     'eur_balance': eur_balance,
@@ -1480,6 +1555,7 @@ class BalanceHistoryView(APIView):
                         'btc_eur': round(btc_eur_price, 2),
                         'bnb_eur': round(bnb_eur_price, 2)
                     },
+                    'flows': flows,
                     'days': days
                 })
 

@@ -7,6 +7,8 @@
 
     <!-- Chart.js from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- Chart.js Sankey Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.12.0/dist/chartjs-chart-sankey.min.js"></script>
 
     <!-- Custom CSS -->
     {% load static %}
@@ -168,6 +170,12 @@
             <div class="chart-container">
                 <h2>💰 Asset-Zusammensetzung pro Tag (gestapelt)</h2>
                 <canvas id="assets-chart"></canvas>
+            </div>
+
+            <!-- Sankey Flow Chart -->
+            <div class="chart-container">
+                <h2>🔄 Geldflüsse zwischen Assets (Sankey)</h2>
+                <canvas id="sankey-chart"></canvas>
             </div>
 
             <!-- Balance Table -->
