@@ -686,12 +686,11 @@ class TradingPerformanceView(APIView):
             # Calculate date range
             since = datetime.now() - timedelta(days=days)
 
-            # Fetch trade history
-            logger.info(f"Fetching trade history for last {days} days")
-            trades = analyzer.fetch_trade_history(
+            # Load trade history from local database (fast, no API limits)
+            logger.info(f"Loading trade history from database for last {days} days")
+            trades = analyzer.get_trades_from_database(
                 symbol='BTC/EUR',
-                since=since,
-                limit=1000
+                since=since
             )
 
             if not trades:
@@ -759,6 +758,92 @@ class TradingPerformanceView(APIView):
             return Response(
                 {
                     'error': 'Error analyzing trading performance',
+                    'message': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class SyncTradesView(APIView):
+    """
+    API endpoint to synchronize trades from Binance to local database.
+
+    GET /api/sync-trades/
+        Triggers incremental sync of BTC/EUR trades from Binance API to SQLite database.
+        Only fetches new trades since last sync (efficient).
+
+    Query parameters:
+        - symbol: Trading pair (default: BTC/EUR)
+        - full_sync: Set to 'true' to force full resync from 1 year ago (default: false)
+
+    Returns:
+        JSON with sync statistics:
+        - trades_synced: Number of new trades added
+        - total_trades_in_db: Total trades in database
+        - latest_trade_datetime: Most recent trade timestamp
+
+    Requires:
+        - BINANCE_API_KEY and BINANCE_API_SECRET in environment variables
+        - Read-only API permissions
+    """
+
+    def get(self, request):
+        from django.conf import settings
+
+        # Check if API keys are configured
+        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
+            return Response(
+                {
+                    'error': 'Binance API keys not configured',
+                    'message': 'Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables in .env file'
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        # Get parameters
+        symbol = request.GET.get('symbol', 'BTC/EUR')
+        full_sync = request.GET.get('full_sync', 'false').lower() == 'true'
+
+        try:
+            # Initialize analyzer
+            analyzer = TradingPerformanceAnalyzer()
+
+            # Determine sync start date
+            since = None
+            if full_sync:
+                # Force full sync from 1 year ago
+                from datetime import datetime, timedelta
+                since = datetime.now() - timedelta(days=365)
+                logger.info(f"Full sync requested: fetching all trades since {since}")
+
+            # Sync trades to database
+            logger.info(f"Starting trade synchronization for {symbol}")
+            sync_result = analyzer.sync_trades_to_database(
+                symbol=symbol,
+                since=since
+            )
+
+            logger.info(f"Trade sync complete: {sync_result}")
+
+            return Response({
+                'status': 'success',
+                'sync_type': 'full' if full_sync else 'incremental',
+                **sync_result
+            })
+
+        except ValueError as e:
+            return Response(
+                {
+                    'error': 'Configuration error',
+                    'message': str(e)
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except Exception as e:
+            logger.error(f"Error syncing trades: {e}", exc_info=True)
+            return Response(
+                {
+                    'error': 'Error syncing trades',
                     'message': str(e)
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR

@@ -7,10 +7,12 @@ Calculates P&L, win-rate, ROI, and fee analysis with BNB conversion to EUR.
 
 import ccxt
 from decimal import Decimal
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from django.conf import settings
+from django.utils import timezone
 import logging
+import sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +112,203 @@ class TradingPerformanceAnalyzer:
         except Exception as e:
             logger.error(f"Error fetching trade history: {e}")
             raise
+
+    def sync_trades_to_database(
+        self,
+        symbol: str = 'BTC/EUR',
+        since: Optional[datetime] = None,
+        db_path: str = None
+    ) -> Dict[str, Any]:
+        """
+        Synchronize trades from Binance API to local SQLite database.
+
+        This function:
+        1. Checks the most recent trade in the database
+        2. Fetches only new trades from Binance API (incremental sync)
+        3. Stores them in the btc_eur_trades table
+        4. Avoids duplicates using trade_id as primary key
+
+        Args:
+            symbol: Trading pair (default: BTC/EUR)
+            since: Start date for sync (default: fetch all trades after latest in DB)
+            db_path: Path to SQLite database (default: btc_eur_data.db in project root)
+
+        Returns:
+            Dictionary with sync statistics:
+            - trades_synced: Number of new trades added
+            - latest_trade_timestamp: Timestamp of most recent trade
+            - total_trades_in_db: Total trades in database after sync
+        """
+        import os
+
+        if db_path is None:
+            # Default: btc_eur_data.db in project root (one level up from webapp/)
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            db_path = os.path.join(project_root, 'btc_eur_data.db')
+
+        logger.info(f"Starting trade synchronization for {symbol}")
+        logger.info(f"Database path: {db_path}")
+
+        # Connect to database
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+
+            # Get the timestamp of the most recent trade in database
+            cursor.execute(
+                "SELECT MAX(timestamp) FROM btc_eur_trades WHERE symbol = ?",
+                (symbol,)
+            )
+            result = cursor.fetchone()
+            latest_timestamp_ms = result[0] if result[0] else None
+
+            # Determine starting point for API fetch
+            if since:
+                since_timestamp_ms = int(since.timestamp() * 1000)
+            elif latest_timestamp_ms:
+                # Fetch trades since last sync (add 1ms to avoid duplicate)
+                since_timestamp_ms = latest_timestamp_ms + 1
+                logger.info(f"Incremental sync: fetching trades since {datetime.fromtimestamp(since_timestamp_ms / 1000)}")
+            else:
+                # No trades in DB yet, fetch from beginning (default: 1 year ago)
+                since = datetime.now() - timedelta(days=365)
+                since_timestamp_ms = int(since.timestamp() * 1000)
+                logger.info(f"Initial sync: fetching all trades since {since}")
+
+            # Fetch trades from Binance API
+            try:
+                logger.info(f"Fetching trades from Binance API (since timestamp: {since_timestamp_ms})")
+                trades = self.exchange.fetch_my_trades(
+                    symbol=symbol,
+                    since=since_timestamp_ms,
+                    limit=1000  # Binance limit
+                )
+
+                logger.info(f"Fetched {len(trades)} trades from Binance API")
+
+                # Insert trades into database (ignore duplicates)
+                trades_synced = 0
+                for trade in trades:
+                    try:
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO btc_eur_trades (
+                                trade_id, order_id, symbol, timestamp, datetime,
+                                side, price, amount, cost,
+                                fee_cost, fee_currency, is_maker
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            str(trade['id']),  # trade_id
+                            str(trade['order']),  # order_id
+                            trade['symbol'],  # symbol
+                            trade['timestamp'],  # timestamp (ms)
+                            datetime.fromtimestamp(trade['timestamp'] / 1000).strftime('%Y-%m-%d %H:%M:%S'),  # datetime
+                            trade['side'],  # side (buy/sell)
+                            float(trade['price']),  # price
+                            float(trade['amount']),  # amount
+                            float(trade['cost']),  # cost
+                            float(trade['fee']['cost']),  # fee_cost
+                            trade['fee']['currency'],  # fee_currency
+                            1 if trade.get('maker', False) else 0  # is_maker
+                        ))
+
+                        if cursor.rowcount > 0:
+                            trades_synced += 1
+
+                    except Exception as e:
+                        logger.warning(f"Failed to insert trade {trade['id']}: {e}")
+                        continue
+
+                conn.commit()
+
+                # Get statistics
+                cursor.execute("SELECT COUNT(*), MAX(timestamp) FROM btc_eur_trades WHERE symbol = ?", (symbol,))
+                total_trades, latest_timestamp = cursor.fetchone()
+
+                logger.info(f"Sync complete: {trades_synced} new trades added, {total_trades} total in database")
+
+                return {
+                    'trades_synced': trades_synced,
+                    'trades_fetched_from_api': len(trades),
+                    'latest_trade_timestamp': latest_timestamp,
+                    'latest_trade_datetime': datetime.fromtimestamp(latest_timestamp / 1000).isoformat() if latest_timestamp else None,
+                    'total_trades_in_db': total_trades,
+                    'symbol': symbol,
+                    'sync_timestamp': datetime.now().isoformat()
+                }
+
+            except Exception as e:
+                logger.error(f"Error during trade synchronization: {e}")
+                raise
+
+    def get_trades_from_database(
+        self,
+        symbol: str = 'BTC/EUR',
+        since: Optional[datetime] = None,
+        limit: Optional[int] = None,
+        db_path: str = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Load trades from local SQLite database.
+
+        Args:
+            symbol: Trading pair (default: BTC/EUR)
+            since: Start date for trades (default: all trades)
+            limit: Maximum number of trades to return (default: all)
+            db_path: Path to SQLite database (default: btc_eur_data.db in project root)
+
+        Returns:
+            List of trades in the same format as fetch_my_trades()
+        """
+        import os
+
+        if db_path is None:
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            db_path = os.path.join(project_root, 'btc_eur_data.db')
+
+        # Build SQL query
+        query = "SELECT * FROM btc_eur_trades WHERE symbol = ?"
+        params = [symbol]
+
+        if since:
+            since_timestamp_ms = int(since.timestamp() * 1000)
+            query += " AND timestamp >= ?"
+            params.append(since_timestamp_ms)
+
+        query += " ORDER BY timestamp DESC"
+
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        # Execute query
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row  # Enable column access by name
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            # Convert to ccxt trade format
+            trades = []
+            for row in rows:
+                trade = {
+                    'id': row['trade_id'],
+                    'order': row['order_id'],
+                    'symbol': row['symbol'],
+                    'timestamp': row['timestamp'],
+                    'datetime': row['datetime'],
+                    'side': row['side'],
+                    'price': float(row['price']),
+                    'amount': float(row['amount']),
+                    'cost': float(row['cost']),
+                    'fee': {
+                        'cost': float(row['fee_cost']),
+                        'currency': row['fee_currency']
+                    },
+                    'maker': bool(row['is_maker'])
+                }
+                trades.append(trade)
+
+            logger.info(f"Loaded {len(trades)} trades from database")
+            return trades
 
     def calculate_performance_metrics(
         self,
