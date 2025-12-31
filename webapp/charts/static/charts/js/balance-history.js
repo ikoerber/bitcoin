@@ -207,25 +207,75 @@ function renderCharts() {
         }
     });
 
-    // 2. Stacked Bar Chart - Assets Composition
+    // 2. Stacked Bar Chart - Assets Composition with locked/free breakdown
+
+    // Prepare datasets with locked/free split for the last bar (current day)
+    const currentLocked = balanceData.current_locked || null;
+    const lastIndex = balanceData.dates.length - 1;
+
+    // Create separate arrays for free and locked portions
+    const eurFreeData = balanceData.eur_balance.map((val, idx) => {
+        if (idx === lastIndex && currentLocked) {
+            return currentLocked.eur_free;
+        }
+        return val;  // Historical data doesn't have locked/free split
+    });
+
+    const eurLockedData = balanceData.eur_balance.map((val, idx) => {
+        if (idx === lastIndex && currentLocked) {
+            return currentLocked.eur_locked;
+        }
+        return 0;  // Only show locked for current day
+    });
+
+    const btcFreeData = balanceData.btc_value_eur.map((val, idx) => {
+        if (idx === lastIndex && currentLocked) {
+            return currentLocked.btc_free_eur;
+        }
+        return val;
+    });
+
+    const btcLockedData = balanceData.btc_value_eur.map((val, idx) => {
+        if (idx === lastIndex && currentLocked) {
+            return currentLocked.btc_locked_eur;
+        }
+        return 0;
+    });
+
     assetsChart = new Chart(assetsChartCanvas, {
         type: 'bar',
         data: {
             labels: labels,
             datasets: [
                 {
-                    label: 'EUR Balance',
-                    data: balanceData.eur_balance,
+                    label: 'EUR (verfügbar)',
+                    data: eurFreeData,
                     backgroundColor: '#4caf50',
                     borderColor: '#4caf50',
                     borderWidth: 1
                 },
                 {
-                    label: 'BTC Wert (EUR)',
-                    data: balanceData.btc_value_eur,
+                    label: 'EUR (in Orders)',
+                    data: eurLockedData,
+                    backgroundColor: 'rgba(76, 175, 80, 0.5)',  // Semi-transparent green
+                    borderColor: '#4caf50',
+                    borderWidth: 1,
+                    borderDash: [5, 5]  // Dashed border to indicate locked
+                },
+                {
+                    label: 'BTC (verfügbar)',
+                    data: btcFreeData,
                     backgroundColor: '#ff9800',
                     borderColor: '#ff9800',
                     borderWidth: 1
+                },
+                {
+                    label: 'BTC (in Orders)',
+                    data: btcLockedData,
+                    backgroundColor: 'rgba(255, 152, 0, 0.5)',  // Semi-transparent orange
+                    borderColor: '#ff9800',
+                    borderWidth: 1,
+                    borderDash: [5, 5]
                 },
                 {
                     label: 'BNB Wert (EUR)',

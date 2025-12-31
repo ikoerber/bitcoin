@@ -1543,6 +1543,18 @@ class BalanceHistoryView(APIView):
                 result = cursor.fetchone()
                 flows['eur_to_withdrawals'] = round(float(result['total'] or 0), 2)
 
+                # Get current locked balances from account
+                current_balances = analyzer.get_account_balances()
+
+                # Calculate locked amounts in EUR
+                eur_locked = current_balances['EUR']['locked']
+                btc_locked = current_balances['BTC']['locked']
+                btc_locked_eur = btc_locked * btc_eur_price
+
+                # Calculate free amounts in EUR (total - locked)
+                eur_free = eur_balance[-1] - eur_locked if eur_balance else 0
+                btc_free_eur = btc_value_eur[-1] - btc_locked_eur if btc_value_eur else 0
+
                 return Response({
                     'dates': dates,
                     'eur_balance': eur_balance,
@@ -1554,6 +1566,13 @@ class BalanceHistoryView(APIView):
                     'current_prices': {
                         'btc_eur': round(btc_eur_price, 2),
                         'bnb_eur': round(bnb_eur_price, 2)
+                    },
+                    'current_locked': {
+                        'eur_free': round(eur_free, 2),
+                        'eur_locked': round(eur_locked, 2),
+                        'btc_free_eur': round(btc_free_eur, 2),
+                        'btc_locked_eur': round(btc_locked_eur, 2),
+                        'btc_locked_amount': round(btc_locked, 8)
                     },
                     'flows': flows,
                     'days': days
