@@ -29,6 +29,7 @@ let trendData = null;  // Cached trend data
 let dayAnalysisEnabled = false;
 let previousDayOpenLine = null;  // Previous day open price line
 let previousDayCloseLine = null;  // Previous day close price line
+let limitOrderLines = [];  // Open limit order price lines
 let savedVisibleRange = null;  // Store original visible range before day mode
 
 /**
@@ -918,6 +919,9 @@ async function enableDayAnalysis() {
         // Draw horizontal lines for previous day open/close
         drawPreviousDayLines(prevDayOpen, prevDayClose, todayStartUnix);
 
+        // Fetch and draw open limit orders
+        await drawOpenLimitOrders(todayStartUnix);
+
         // Set visible range to yesterday start → now
         const visibleFrom = yesterdayStartUnix;
         const visibleTo = Math.floor(now.getTime() / 1000);
@@ -1026,6 +1030,98 @@ function drawPreviousDayLines(openPrice, closePrice, fromTime) {
 }
 
 /**
+ * Fetch and draw open limit orders as price lines
+ */
+async function drawOpenLimitOrders(fromTime) {
+    if (!chart) return;
+
+    // Clear old limit order lines
+    clearLimitOrderLines();
+
+    try {
+        // Fetch open orders from API
+        const response = await fetch('/api/sync-open-orders/');
+        if (!response.ok) {
+            console.warn('Could not fetch open orders:', response.status);
+            return;
+        }
+
+        const data = await response.json();
+
+        if (!data || !data.total_open_orders || data.total_open_orders === 0) {
+            console.log('No open limit orders to display');
+            return;
+        }
+
+        // Fetch detailed order data from database via cashflow API
+        // (We need to get individual order details)
+        const cashflowResponse = await fetch('/api/cashflow/?limit=1000&days=1');
+        if (!cashflowResponse.ok) {
+            console.warn('Could not fetch order details');
+            return;
+        }
+
+        const cashflowData = await cashflowResponse.json();
+        const openOrders = cashflowData.transactions.filter(tx =>
+            tx.status === 'open' && (tx.type === 'limit_buy' || tx.type === 'limit_sell')
+        );
+
+        console.log(`Found ${openOrders.length} open limit orders to display`);
+
+        // Extend line to future
+        const futureTime = fromTime + (86400 * 30);  // 30 days ahead
+
+        // Draw each order as a horizontal line
+        openOrders.forEach((order, index) => {
+            const isBuy = order.type === 'limit_buy';
+            const price = order.price;
+            const btcAmount = Math.abs(order.amount_btc);
+
+            // Create line series
+            const lineSeries = chart.addLineSeries({
+                color: isBuy ? '#26a69a' : '#ef5350',  // Green for buy, red for sell
+                lineWidth: 2,
+                lineStyle: 1,  // Dashed line (LineStyle.Dashed = 1)
+                crosshairMarkerVisible: true,
+                lastValueVisible: true,
+                priceLineVisible: true,
+                title: `${isBuy ? 'Buy' : 'Sell'} ${btcAmount.toFixed(4)} BTC @ €${price.toFixed(2)}`
+            });
+
+            // Set line data
+            const lineData = [
+                { time: fromTime, value: price },
+                { time: futureTime, value: price }
+            ];
+
+            lineSeries.setData(lineData);
+            limitOrderLines.push(lineSeries);
+
+            console.log(`Drew ${isBuy ? 'buy' : 'sell'} limit line at €${price.toFixed(2)} for ${btcAmount.toFixed(4)} BTC`);
+        });
+
+        console.log(`Drew ${limitOrderLines.length} limit order lines`);
+
+    } catch (error) {
+        console.error('Error drawing limit orders:', error);
+    }
+}
+
+/**
+ * Clear limit order lines
+ */
+function clearLimitOrderLines() {
+    limitOrderLines.forEach(line => {
+        try {
+            chart.removeSeries(line);
+        } catch (error) {
+            console.debug('Error removing limit order line:', error);
+        }
+    });
+    limitOrderLines = [];
+}
+
+/**
  * Clear previous day reference lines
  */
 function clearPreviousDayLines() {
@@ -1063,6 +1159,7 @@ function disableDayAnalysis() {
 
     // Remove reference lines
     clearPreviousDayLines();
+    clearLimitOrderLines();
 
     // Re-enable auto-scaling for price axis
     if (chart && candlestickSeries) {
