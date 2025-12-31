@@ -47,6 +47,15 @@ def dashboard(request):
     return render(request, 'charts/dashboard.html', context)
 
 
+def cashflow(request):
+    """
+    Cashflow timeline view - renders the cashflow template.
+
+    Shows all transactions (deposits, trades, converts, open orders) in chronological order.
+    """
+    return render(request, 'charts/cashflow.html')
+
+
 # ==================== REST API VIEWS ====================
 
 class OHLCVDataView(APIView):
@@ -1062,6 +1071,242 @@ class AccountBalanceView(APIView):
             return Response(
                 {
                     'error': 'Error fetching account balances',
+                    'message': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class CashflowView(APIView):
+    """
+    API endpoint to get all cashflow transactions (deposits, trades, converts, orders).
+
+    GET /api/cashflow/
+        Returns all transactions from all sources in chronological order.
+
+    Query parameters:
+        - limit: Max number of transactions to return (default: 100)
+        - days: Number of days to look back (default: 30)
+        - type: Filter by type (deposit, withdrawal, trade, convert, order)
+
+    Returns:
+        JSON array of transactions with individual cashflows
+    """
+
+    def get(self, request):
+        import sqlite3
+        from django.conf import settings
+
+        # Get query parameters
+        limit = int(request.GET.get('limit', 100))
+        days = int(request.GET.get('days', 30))
+        type_filter = request.GET.get('type', None)
+
+        # Validate limits
+        if limit > 1000:
+            limit = 1000
+        if days > 365:
+            days = 365
+
+        # Calculate timestamp threshold
+        from datetime import datetime, timedelta
+        threshold_date = datetime.now() - timedelta(days=days)
+        threshold_timestamp = int(threshold_date.timestamp() * 1000)
+
+        try:
+            # Connect to database
+            db_path = settings.DATABASES['default']['NAME']
+
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+
+                transactions = []
+
+                # 1. Get asset transactions (deposits, withdrawals, converts, transfers)
+                cursor.execute("""
+                    SELECT
+                        transaction_id as id,
+                        timestamp,
+                        datetime,
+                        transaction_type as type,
+                        status,
+                        currency,
+                        amount,
+                        from_currency,
+                        to_currency,
+                        from_amount,
+                        fee,
+                        fee_currency,
+                        network,
+                        address
+                    FROM asset_transactions
+                    WHERE timestamp >= ?
+                    ORDER BY timestamp DESC
+                """, (threshold_timestamp,))
+
+                for row in cursor.fetchall():
+                    tx_type = row['type']
+                    description = ''
+
+                    if tx_type == 'deposit':
+                        description = f"{row['currency']} Deposit"
+                        if row['network']:
+                            description += f" via {row['network']}"
+                    elif tx_type == 'withdrawal':
+                        description = f"{row['currency']} Withdrawal"
+                        if row['network']:
+                            description += f" via {row['network']}"
+                    elif tx_type == 'convert':
+                        description = f"Convert {row['from_amount']} {row['from_currency']} → {row['amount']} {row['to_currency']}"
+                    elif tx_type == 'transfer':
+                        description = f"{row['currency']} Internal Transfer"
+
+                    transactions.append({
+                        'id': row['id'],
+                        'timestamp': row['timestamp'],
+                        'datetime': row['datetime'],
+                        'type': tx_type,
+                        'status': row['status'] or 'completed',
+                        'currency': row['currency'],
+                        'amount': float(row['amount']) if row['amount'] else 0.0,
+                        'price': None,
+                        'from_currency': row['from_currency'],
+                        'to_currency': row['to_currency'],
+                        'from_amount': float(row['from_amount']) if row['from_amount'] else None,
+                        'to_amount': float(row['amount']) if row['amount'] and tx_type == 'convert' else None,
+                        'fee': float(row['fee']) if row['fee'] else 0.0,
+                        'fee_currency': row['fee_currency'],
+                        'description': description
+                    })
+
+                # 2. Get trades (buy/sell orders)
+                cursor.execute("""
+                    SELECT
+                        trade_id as id,
+                        timestamp,
+                        datetime,
+                        side,
+                        price,
+                        amount,
+                        cost,
+                        fee_cost,
+                        fee_currency,
+                        is_maker
+                    FROM btc_eur_trades
+                    WHERE timestamp >= ?
+                    ORDER BY timestamp DESC
+                """, (threshold_timestamp,))
+
+                for row in cursor.fetchall():
+                    side = row['side']
+                    amount_btc = float(row['amount'])
+                    cost_eur = float(row['cost'])
+                    price = float(row['price'])
+
+                    if side == 'buy':
+                        description = f"Buy {amount_btc:.8f} BTC @ €{price:.2f}"
+                        currency = 'EUR'
+                        amount = -cost_eur  # Negative = money out
+                    else:  # sell
+                        description = f"Sell {amount_btc:.8f} BTC @ €{price:.2f}"
+                        currency = 'EUR'
+                        amount = cost_eur  # Positive = money in
+
+                    transactions.append({
+                        'id': row['id'],
+                        'timestamp': row['timestamp'],
+                        'datetime': row['datetime'],
+                        'type': side,
+                        'status': 'completed',
+                        'currency': currency,
+                        'amount': amount,
+                        'amount_btc': amount_btc,
+                        'price': price,
+                        'from_currency': None,
+                        'to_currency': None,
+                        'from_amount': None,
+                        'to_amount': None,
+                        'fee': float(row['fee_cost']) if row['fee_cost'] else 0.0,
+                        'fee_currency': row['fee_currency'],
+                        'is_maker': bool(row['is_maker']),
+                        'description': description
+                    })
+
+                # 3. Get open orders (pending cashflow)
+                cursor.execute("""
+                    SELECT
+                        order_id as id,
+                        timestamp,
+                        datetime,
+                        side,
+                        price,
+                        amount,
+                        remaining,
+                        status
+                    FROM open_orders
+                    WHERE symbol = 'BTC/EUR'
+                    ORDER BY timestamp DESC
+                """)
+
+                for row in cursor.fetchall():
+                    side = row['side']
+                    remaining_btc = float(row['remaining'])
+                    price = float(row['price'])
+                    cost_eur = remaining_btc * price
+
+                    if side == 'buy':
+                        description = f"Open Limit Buy {remaining_btc:.8f} BTC @ €{price:.2f}"
+                        currency = 'EUR'
+                        amount = -cost_eur  # Will be spent when filled
+                    else:  # sell
+                        description = f"Open Limit Sell {remaining_btc:.8f} BTC @ €{price:.2f}"
+                        currency = 'EUR'
+                        amount = cost_eur  # Will be received when filled
+
+                    transactions.append({
+                        'id': row['id'],
+                        'timestamp': row['timestamp'],
+                        'datetime': row['datetime'],
+                        'type': f'limit_{side}',
+                        'status': 'open',
+                        'currency': currency,
+                        'amount': amount,
+                        'amount_btc': remaining_btc,
+                        'price': price,
+                        'from_currency': None,
+                        'to_currency': None,
+                        'from_amount': None,
+                        'to_amount': None,
+                        'fee': 0.0,
+                        'fee_currency': None,
+                        'description': description
+                    })
+
+                # Sort all transactions by timestamp (newest first)
+                transactions.sort(key=lambda x: x['timestamp'], reverse=True)
+
+                # Apply type filter if specified
+                if type_filter:
+                    transactions = [tx for tx in transactions if tx['type'] == type_filter]
+
+                # Apply limit
+                transactions = transactions[:limit]
+
+                logger.info(f"Cashflow query: {len(transactions)} transactions (last {days} days)")
+
+                return Response({
+                    'transactions': transactions,
+                    'total_count': len(transactions),
+                    'days': days,
+                    'limit': limit
+                })
+
+        except Exception as e:
+            logger.error(f"Error fetching cashflow: {e}", exc_info=True)
+            return Response(
+                {
+                    'error': 'Error fetching cashflow',
                     'message': str(e)
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR

@@ -46,6 +46,12 @@ body {
     color: #f5f5f5;
 }
 
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
 .latest-price {
     display: flex;
     align-items: center;

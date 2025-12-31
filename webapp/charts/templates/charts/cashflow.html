@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cashflow Timeline - BTC/EUR Trading</title>
+
+    <!-- Custom CSS -->
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'charts/css/style.css' %}">
+    <link rel="stylesheet" href="{% static 'charts/css/cashflow.css' %}">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>💸 Cashflow Timeline</h1>
+                <div class="header-actions">
+                    <a href="/" class="btn btn-secondary">📊 Zurück zum Dashboard</a>
+                </div>
+            </div>
+        </header>
+
+        <!-- Controls Panel -->
+        <div class="controls-panel">
+            <div class="control-group">
+                <label for="days-select">Zeitraum:</label>
+                <select id="days-select" class="control-select">
+                    <option value="7">Letzte 7 Tage</option>
+                    <option value="30" selected>Letzte 30 Tage</option>
+                    <option value="90">Letzte 90 Tage</option>
+                    <option value="180">Letzte 180 Tage</option>
+                    <option value="365">Letztes Jahr</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="type-filter">Typ Filter:</label>
+                <select id="type-filter" class="control-select">
+                    <option value="">Alle Transaktionen</option>
+                    <option value="deposit">Einzahlungen</option>
+                    <option value="withdrawal">Auszahlungen</option>
+                    <option value="buy">Käufe</option>
+                    <option value="sell">Verkäufe</option>
+                    <option value="convert">Conversions</option>
+                    <option value="limit_buy">Offene Buy Orders</option>
+                    <option value="limit_sell">Offene Sell Orders</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <button id="refresh-btn" class="btn btn-primary">🔄 Aktualisieren</button>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="summary-cards">
+            <div class="summary-card">
+                <div class="summary-label">Gesamt Transaktionen</div>
+                <div class="summary-value" id="total-transactions">-</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">EUR Einzahlungen</div>
+                <div class="summary-value positive" id="total-deposits">-</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">BTC Käufe</div>
+                <div class="summary-value" id="total-buys">-</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">BTC Verkäufe</div>
+                <div class="summary-value" id="total-sells">-</div>
+            </div>
+        </div>
+
+        <!-- Timeline Container -->
+        <div class="timeline-container">
+            <div id="loading-message" class="loading-message">
+                <div class="spinner"></div>
+                <p>Lade Transaktionen...</p>
+            </div>
+
+            <div id="error-message" class="error-message" style="display: none;">
+                <p></p>
+            </div>
+
+            <div id="timeline" class="timeline">
+                <!-- Timeline entries will be inserted here by JavaScript -->
+            </div>
+
+            <div id="no-data-message" class="no-data-message" style="display: none;">
+                <p>Keine Transaktionen für den ausgewählten Zeitraum gefunden.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom JavaScript -->
+    <script src="{% static 'charts/js/cashflow.js' %}"></script>
+</body>
+</html>

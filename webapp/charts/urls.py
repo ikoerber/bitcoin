@@ -10,6 +10,7 @@ app_name = 'charts'
 urlpatterns = [
     # Frontend
     path('', views.dashboard, name='dashboard'),
+    path('cashflow/', views.cashflow, name='cashflow'),
 
     # REST API Endpoints
     path('api/ohlcv/<str:timeframe>/', views.OHLCVDataView.as_view(), name='ohlcv'),
@@ -24,4 +25,5 @@ urlpatterns = [
     path('api/sync-asset-history/', views.SyncAssetHistoryView.as_view(), name='sync-asset-history'),
     path('api/sync-open-orders/', views.SyncOpenOrdersView.as_view(), name='sync-open-orders'),
     path('api/account-balance/', views.AccountBalanceView.as_view(), name='account-balance'),
+    path('api/cashflow/', views.CashflowView.as_view(), name='cashflow'),
 ]
