@@ -11,6 +11,7 @@ urlpatterns = [
     # Frontend
     path('', views.dashboard, name='dashboard'),
     path('cashflow/', views.cashflow, name='cashflow'),
+    path('balance-history/', views.balance_history, name='balance-history'),
 
     # REST API Endpoints
     path('api/ohlcv/<str:timeframe>/', views.OHLCVDataView.as_view(), name='ohlcv'),
@@ -26,4 +27,5 @@ urlpatterns = [
     path('api/sync-open-orders/', views.SyncOpenOrdersView.as_view(), name='sync-open-orders'),
     path('api/account-balance/', views.AccountBalanceView.as_view(), name='account-balance'),
     path('api/cashflow/', views.CashflowView.as_view(), name='cashflow'),
+    path('api/balance-history/', views.BalanceHistoryView.as_view(), name='balance-history'),
 ]

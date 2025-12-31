@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Balance History - BTC/EUR Trading</title>
+
+    <!-- Chart.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- Custom CSS -->
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'charts/css/style.css' %}">
+    <link rel="stylesheet" href="{% static 'charts/css/cashflow.css' %}">
+    <style>
+        .chart-container {
+            background: #1e222d;
+            border: 1px solid #2a2e39;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            min-height: 400px;
+        }
+
+        .chart-container h2 {
+            color: #d1d4dc;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .balance-table {
+            width: 100%;
+            background: #1e222d;
+            border: 1px solid #2a2e39;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .balance-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .balance-table th {
+            background: #131722;
+            color: #9598a1;
+            padding: 12px;
+            text-align: left;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #2a2e39;
+        }
+
+        .balance-table td {
+            padding: 12px;
+            color: #d1d4dc;
+            border-bottom: 1px solid #2a2e39;
+        }
+
+        .balance-table tr:hover {
+            background: rgba(41, 98, 255, 0.05);
+        }
+
+        .balance-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .value-positive {
+            color: #26a69a;
+        }
+
+        .value-negative {
+            color: #ef5350;
+        }
+
+        .value-total {
+            font-weight: 600;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>📊 Balance History</h1>
+                <div class="header-actions">
+                    <a href="/" class="btn btn-secondary">📈 Dashboard</a>
+                    <a href="/cashflow/" class="btn btn-secondary">💸 Cashflow</a>
+                </div>
+            </div>
+        </header>
+
+        <!-- Controls Panel -->
+        <div class="controls-panel">
+            <div class="control-group">
+                <label for="days-select">Zeitraum:</label>
+                <select id="days-select" class="control-select">
+                    <option value="7">Letzte 7 Tage</option>
+                    <option value="30" selected>Letzte 30 Tage</option>
+                    <option value="90">Letzte 90 Tage</option>
+                    <option value="180">Letzte 180 Tage</option>
+                    <option value="365">Letztes Jahr</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <button id="refresh-btn" class="btn btn-primary">🔄 Aktualisieren</button>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="summary-cards">
+            <div class="summary-card">
+                <div class="summary-label">Aktuelles Gesamt­vermögen</div>
+                <div class="summary-value value-total" id="total-value">-</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">EUR Balance</div>
+                <div class="summary-value" id="eur-balance">-</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">BTC Balance (in EUR)</div>
+                <div class="summary-value" id="btc-balance">-</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">BNB Balance (in EUR)</div>
+                <div class="summary-value" id="bnb-balance">-</div>
+            </div>
+        </div>
+
+        <!-- Loading/Error Messages -->
+        <div id="loading-message" class="loading-message">
+            <div class="spinner"></div>
+            <p>Lade Balance History...</p>
+        </div>
+
+        <div id="error-message" class="error-message" style="display: none;">
+            <p></p>
+        </div>
+
+        <!-- Charts Container -->
+        <div id="charts-container" style="display: none;">
+            <!-- Total Value Chart -->
+            <div class="chart-container">
+                <h2>📈 Gesamtvermögen in EUR (über Zeit)</h2>
+                <canvas id="total-chart"></canvas>
+            </div>
+
+            <!-- Individual Assets Chart -->
+            <div class="chart-container">
+                <h2>💰 Asset-Werte in EUR (über Zeit)</h2>
+                <canvas id="assets-chart"></canvas>
+            </div>
+
+            <!-- Balance Table -->
+            <div class="balance-table">
+                <h2 style="padding: 15px; margin: 0; color: #d1d4dc; font-size: 18px;">📋 Tägliche Übersicht</h2>
+                <table id="balance-table">
+                    <thead>
+                        <tr>
+                            <th>Datum</th>
+                            <th>EUR Balance</th>
+                            <th>BTC (Stück)</th>
+                            <th>BTC (EUR)</th>
+                            <th>BNB (Stück)</th>
+                            <th>BNB (EUR)</th>
+                            <th>Gesamt (EUR)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="balance-table-body">
+                        <!-- Table rows will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="no-data-message" class="no-data-message" style="display: none;">
+            <p>Keine Balance-Daten für den ausgewählten Zeitraum gefunden.</p>
+        </div>
+    </div>
+
+    <!-- Custom JavaScript -->
+    <script src="{% static 'charts/js/balance-history.js' %}"></script>
+</body>
+</html>

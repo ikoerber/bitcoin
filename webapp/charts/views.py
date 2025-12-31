@@ -56,6 +56,15 @@ def cashflow(request):
     return render(request, 'charts/cashflow.html')
 
 
+def balance_history(request):
+    """
+    Balance history view - renders the balance history template.
+
+    Shows daily balance evolution for EUR, BTC, BNB with total portfolio value in EUR.
+    """
+    return render(request, 'charts/balance-history.html')
+
+
 # ==================== REST API VIEWS ====================
 
 class OHLCVDataView(APIView):
@@ -1307,6 +1316,178 @@ class CashflowView(APIView):
             return Response(
                 {
                     'error': 'Error fetching cashflow',
+                    'message': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class BalanceHistoryView(APIView):
+    """
+    API endpoint to get daily balance history with EUR conversion.
+
+    GET /api/balance-history/
+        Returns daily snapshots of EUR, BTC, BNB balances with total in EUR.
+
+    Query parameters:
+        - days: Number of days to look back (default: 30, max: 365)
+
+    Returns:
+        JSON with daily balance data:
+        {
+            'dates': ['2025-12-01', '2025-12-02', ...],
+            'eur_balance': [1000.0, 950.0, ...],
+            'btc_balance': [0.01, 0.015, ...],
+            'bnb_balance': [0.5, 0.48, ...],
+            'btc_value_eur': [750.0, 1125.0, ...],
+            'bnb_value_eur': [350.0, 336.0, ...],
+            'total_value_eur': [2100.0, 2411.0, ...],
+            'current_prices': {
+                'btc_eur': 75000.0,
+                'bnb_eur': 700.0
+            }
+        }
+    """
+
+    def get(self, request):
+        import sqlite3
+        from django.conf import settings
+        from datetime import datetime, timedelta
+        from collections import defaultdict
+
+        # Get query parameters
+        days = int(request.GET.get('days', 30))
+        if days > 365:
+            days = 365
+
+        try:
+            # Get current BTC/EUR and BNB/EUR prices
+            from .trading_performance import TradingPerformanceAnalyzer
+            analyzer = TradingPerformanceAnalyzer()
+
+            btc_eur_price = analyzer.exchange.fetch_ticker('BTC/EUR')['last']
+            bnb_eur_price = analyzer.exchange.fetch_ticker('BNB/EUR')['last']
+
+            logger.info(f"Current prices: BTC/EUR={btc_eur_price:.2f}, BNB/EUR={bnb_eur_price:.2f}")
+
+            # Connect to database
+            db_path = settings.DATABASES['default']['NAME']
+
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+
+                # Calculate date range
+                end_date = datetime.now().date()
+                start_date = end_date - timedelta(days=days)
+
+                # Initialize daily balance tracking
+                daily_deltas = defaultdict(lambda: {'eur': 0, 'btc': 0, 'bnb': 0})
+
+                # 1. Get asset transactions (deposits, withdrawals)
+                cursor.execute("""
+                    SELECT
+                        date(datetime) as date,
+                        currency,
+                        SUM(CASE WHEN transaction_type IN ('deposit', 'transfer') THEN amount ELSE -amount END) as net_amount
+                    FROM asset_transactions
+                    WHERE date(datetime) >= ?
+                    GROUP BY date(datetime), currency
+                """, (start_date.isoformat(),))
+
+                for row in cursor.fetchall():
+                    date = row['date']
+                    currency = row['currency'].upper()
+                    amount = float(row['net_amount'])
+
+                    if currency == 'EUR':
+                        daily_deltas[date]['eur'] += amount
+                    elif currency == 'BTC':
+                        daily_deltas[date]['btc'] += amount
+                    elif currency == 'BNB':
+                        daily_deltas[date]['bnb'] += amount
+
+                # 2. Get trades (BTC buys/sells affect EUR and BTC)
+                cursor.execute("""
+                    SELECT
+                        date(datetime) as date,
+                        SUM(CASE WHEN side = 'buy' THEN amount ELSE -amount END) as btc_delta,
+                        SUM(CASE WHEN side = 'buy' THEN -cost ELSE cost END) as eur_delta,
+                        SUM(CASE WHEN fee_currency = 'BNB' THEN -fee_cost ELSE 0 END) as bnb_fees
+                    FROM btc_eur_trades
+                    WHERE date(datetime) >= ?
+                    GROUP BY date(datetime)
+                """, (start_date.isoformat(),))
+
+                for row in cursor.fetchall():
+                    date = row['date']
+                    daily_deltas[date]['btc'] += float(row['btc_delta'] or 0)
+                    daily_deltas[date]['eur'] += float(row['eur_delta'] or 0)
+                    daily_deltas[date]['bnb'] += float(row['bnb_fees'] or 0)
+
+                # 3. Build cumulative daily balances
+                dates = []
+                eur_balance = []
+                btc_balance = []
+                bnb_balance = []
+                btc_value_eur = []
+                bnb_value_eur = []
+                total_value_eur = []
+
+                # Start with initial balances (0 or fetch from earliest known state)
+                cumulative_eur = 0
+                cumulative_btc = 0
+                cumulative_bnb = 0
+
+                # Generate daily data points
+                current_date = start_date
+                while current_date <= end_date:
+                    date_str = current_date.isoformat()
+
+                    # Apply deltas for this day
+                    if date_str in daily_deltas:
+                        cumulative_eur += daily_deltas[date_str]['eur']
+                        cumulative_btc += daily_deltas[date_str]['btc']
+                        cumulative_bnb += daily_deltas[date_str]['bnb']
+
+                    # Calculate EUR values
+                    btc_eur_value = cumulative_btc * btc_eur_price
+                    bnb_eur_value = cumulative_bnb * bnb_eur_price
+                    total_eur = cumulative_eur + btc_eur_value + bnb_eur_value
+
+                    # Store data points
+                    dates.append(date_str)
+                    eur_balance.append(round(cumulative_eur, 2))
+                    btc_balance.append(round(cumulative_btc, 8))
+                    bnb_balance.append(round(cumulative_bnb, 8))
+                    btc_value_eur.append(round(btc_eur_value, 2))
+                    bnb_value_eur.append(round(bnb_eur_value, 2))
+                    total_value_eur.append(round(total_eur, 2))
+
+                    current_date += timedelta(days=1)
+
+                logger.info(f"Balance history: {len(dates)} days, total EUR: {total_value_eur[-1] if total_value_eur else 0:.2f}")
+
+                return Response({
+                    'dates': dates,
+                    'eur_balance': eur_balance,
+                    'btc_balance': btc_balance,
+                    'bnb_balance': bnb_balance,
+                    'btc_value_eur': btc_value_eur,
+                    'bnb_value_eur': bnb_value_eur,
+                    'total_value_eur': total_value_eur,
+                    'current_prices': {
+                        'btc_eur': round(btc_eur_price, 2),
+                        'bnb_eur': round(bnb_eur_price, 2)
+                    },
+                    'days': days
+                })
+
+        except Exception as e:
+            logger.error(f"Error fetching balance history: {e}", exc_info=True)
+            return Response(
+                {
+                    'error': 'Error fetching balance history',
                     'message': str(e)
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
