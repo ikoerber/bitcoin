@@ -1546,14 +1546,19 @@ class BalanceHistoryView(APIView):
                 # Get current locked balances from account
                 current_balances = analyzer.get_account_balances()
 
-                # Calculate locked amounts in EUR
+                # Use actual current balances from Binance (not historical cumulative)
+                eur_total_current = current_balances['EUR']['total']
+                eur_free_current = current_balances['EUR']['free']
                 eur_locked = current_balances['EUR']['locked']
-                btc_locked = current_balances['BTC']['locked']
-                btc_locked_eur = btc_locked * btc_eur_price
 
-                # Calculate free amounts in EUR (total - locked)
-                eur_free = eur_balance[-1] - eur_locked if eur_balance else 0
-                btc_free_eur = btc_value_eur[-1] - btc_locked_eur if btc_value_eur else 0
+                btc_total_current = current_balances['BTC']['total']
+                btc_free_current = current_balances['BTC']['free']
+                btc_locked = current_balances['BTC']['locked']
+
+                # Convert to EUR
+                btc_total_eur = btc_total_current * btc_eur_price
+                btc_free_eur = btc_free_current * btc_eur_price
+                btc_locked_eur = btc_locked * btc_eur_price
 
                 return Response({
                     'dates': dates,
@@ -1568,10 +1573,11 @@ class BalanceHistoryView(APIView):
                         'bnb_eur': round(bnb_eur_price, 2)
                     },
                     'current_locked': {
-                        'eur_free': round(eur_free, 2),
+                        'eur_free': round(eur_free_current, 2),
                         'eur_locked': round(eur_locked, 2),
                         'btc_free_eur': round(btc_free_eur, 2),
                         'btc_locked_eur': round(btc_locked_eur, 2),
+                        'btc_free_amount': round(btc_free_current, 8),
                         'btc_locked_amount': round(btc_locked, 8)
                     },
                     'flows': flows,
