@@ -33,6 +33,12 @@ let trendLineSeries = null;  // Main trendline
 let swingPointMarkers = [];  // Swing high/low markers
 let trendData = null;  // Cached trend data
 
+// Day analysis mode
+let dayAnalysisEnabled = false;
+let previousDayOpenLine = null;  // Previous day open price line
+let previousDayCloseLine = null;  // Previous day close price line
+let savedVisibleRange = null;  // Store original visible range before day mode
+
 /**
  * Initialize TradingView charts (main + volume)
  */
@@ -318,6 +324,11 @@ async function onTimeframeChange(timeframe) {
     if (trendEnabled) {
         await loadAndDisplayTrend();
     }
+
+    // Reload day analysis if enabled
+    if (dayAnalysisEnabled) {
+        await enableDayAnalysis();
+    }
 }
 
 
@@ -436,7 +447,7 @@ function initEventListeners() {
 }
 
 /**
- * Update database from Binance
+ * Update database from Binance (with confirmation)
  */
 async function updateDatabase() {
     const button = document.getElementById('update-db-btn');
@@ -470,6 +481,36 @@ async function updateDatabase() {
             button.disabled = false;
             button.textContent = originalText;
         }
+    }
+}
+
+/**
+ * Update database from Binance silently (no confirmation, no reload popup)
+ * Used internally by day analysis mode
+ */
+async function updateDatabaseSilent() {
+    try {
+        console.log('Fetching latest data from Binance...');
+
+        const response = await fetch('/api/update-database/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log('✅ Database updated successfully');
+            return true;
+        } else {
+            console.error('Database update failed:', data);
+            return false;
+        }
+    } catch (error) {
+        console.error('Error updating database silently:', error);
+        return false;
     }
 }
 
@@ -907,4 +948,235 @@ function clearTrend() {
     trendData = null;
 
     console.log('Cleared all trend visualizations');
+}
+
+/**
+ * Toggle day analysis mode on/off
+ */
+async function toggleDayAnalysis() {
+    dayAnalysisEnabled = !dayAnalysisEnabled;
+    const button = document.getElementById('day-analysis-toggle');
+
+    if (dayAnalysisEnabled) {
+        // Show loading state
+        button.disabled = true;
+        button.textContent = '📅 Lädt...';
+
+        // 1. Update database silently to get latest data
+        console.log('Day analysis mode: Fetching latest data from Binance...');
+        await updateDatabaseSilent();
+
+        // 2. Reload chart data
+        console.log('Day analysis mode: Reloading chart data...');
+        await loadChartData(currentTimeframe, CANDLE_LIMIT);
+
+        // 3. Enable day analysis
+        button.classList.add('active');
+        button.textContent = '📅 Heute: AN';
+        button.disabled = false;
+        await enableDayAnalysis();
+    } else {
+        button.classList.remove('active');
+        button.textContent = '📅 Heute: AUS';
+        disableDayAnalysis();
+    }
+}
+
+/**
+ * Enable day analysis mode
+ * - Sets visible range to current day + previous day
+ * - Draws previous day open/close reference lines
+ */
+async function enableDayAnalysis() {
+    if (!candlestickSeries) {
+        console.error('Chart not initialized');
+        return;
+    }
+
+    try {
+        // Save current visible range to restore later
+        try {
+            savedVisibleRange = chart.timeScale().getVisibleRange();
+        } catch (error) {
+            console.debug('Could not save current visible range:', error);
+        }
+
+        // Get all data from the candlestick series
+        const allData = candlestickSeries.data();
+        if (!allData || allData.length === 0) {
+            console.warn('No chart data available for day analysis');
+            return;
+        }
+
+        // Calculate time boundaries (current day start, yesterday start)
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+        const yesterdayStart = new Date(todayStart);
+        yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+        const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
+        const yesterdayStartUnix = Math.floor(yesterdayStart.getTime() / 1000);
+
+        console.log('Day analysis time range:', {
+            yesterdayStart: new Date(yesterdayStartUnix * 1000).toISOString(),
+            todayStart: new Date(todayStartUnix * 1000).toISOString(),
+            now: now.toISOString()
+        });
+
+        // Find data for yesterday and today
+        const yesterdayData = allData.filter(d => d.time >= yesterdayStartUnix && d.time < todayStartUnix);
+        const todayData = allData.filter(d => d.time >= todayStartUnix);
+
+        console.log(`Found ${yesterdayData.length} candles for yesterday, ${todayData.length} for today`);
+
+        if (yesterdayData.length === 0) {
+            alert('Keine Daten für den Vortag gefunden.\n\nTipp: Verwenden Sie 15m oder 1h Timeframe für Tagesanalyse.');
+            dayAnalysisEnabled = false;
+            const button = document.getElementById('day-analysis-toggle');
+            button.classList.remove('active');
+            button.textContent = '📅 Heute: AUS';
+            return;
+        }
+
+        // Get previous day open (first candle) and close (last candle)
+        const prevDayOpen = yesterdayData[0].open;
+        const prevDayClose = yesterdayData[yesterdayData.length - 1].close;
+
+        console.log('Previous day levels:', {
+            open: prevDayOpen,
+            close: prevDayClose
+        });
+
+        // Draw horizontal lines for previous day open/close
+        drawPreviousDayLines(prevDayOpen, prevDayClose, todayStartUnix);
+
+        // Set visible range to yesterday start → now
+        const visibleFrom = yesterdayStartUnix;
+        const visibleTo = Math.floor(now.getTime() / 1000);
+
+        chart.timeScale().setVisibleRange({
+            from: visibleFrom,
+            to: visibleTo
+        });
+
+        volumeChart.timeScale().setVisibleRange({
+            from: visibleFrom,
+            to: visibleTo
+        });
+
+        console.log('Day analysis mode enabled');
+
+    } catch (error) {
+        console.error('Error enabling day analysis:', error);
+        alert(`Fehler beim Aktivieren der Tagesanalyse:\n${error.message}`);
+    }
+}
+
+/**
+ * Draw horizontal reference lines for previous day open/close
+ */
+function drawPreviousDayLines(openPrice, closePrice, fromTime) {
+    if (!chart) return;
+
+    // Remove old lines if they exist
+    clearPreviousDayLines();
+
+    // Create line series for previous day open (yellow)
+    previousDayOpenLine = chart.addLineSeries({
+        color: '#f9a825',  // Dark yellow/gold
+        lineWidth: 2,
+        lineStyle: 2,  // Dashed line
+        crosshairMarkerVisible: true,
+        lastValueVisible: true,
+        priceLineVisible: true,
+        title: 'Vortag Open'
+    });
+
+    // Create line series for previous day close (yellow)
+    previousDayCloseLine = chart.addLineSeries({
+        color: '#fdd835',  // Bright yellow
+        lineWidth: 2,
+        lineStyle: 2,  // Dashed line
+        crosshairMarkerVisible: true,
+        lastValueVisible: true,
+        priceLineVisible: true,
+        title: 'Vortag Close'
+    });
+
+    // Create data points extending from today's start to far future
+    const futureTime = fromTime + (86400 * 30);  // Extend 30 days into future
+
+    const openLineData = [
+        { time: fromTime, value: openPrice },
+        { time: futureTime, value: openPrice }
+    ];
+
+    const closeLineData = [
+        { time: fromTime, value: closePrice },
+        { time: futureTime, value: closePrice }
+    ];
+
+    previousDayOpenLine.setData(openLineData);
+    previousDayCloseLine.setData(closeLineData);
+
+    console.log('Drew previous day reference lines:', {
+        open: openPrice,
+        close: closePrice,
+        fromTime: new Date(fromTime * 1000).toISOString()
+    });
+}
+
+/**
+ * Clear previous day reference lines
+ */
+function clearPreviousDayLines() {
+    if (previousDayOpenLine) {
+        try {
+            chart.removeSeries(previousDayOpenLine);
+        } catch (error) {
+            console.debug('Error removing previous day open line:', error);
+        }
+        previousDayOpenLine = null;
+    }
+
+    if (previousDayCloseLine) {
+        try {
+            chart.removeSeries(previousDayCloseLine);
+        } catch (error) {
+            console.debug('Error removing previous day close line:', error);
+        }
+        previousDayCloseLine = null;
+    }
+
+    console.log('Cleared previous day reference lines');
+}
+
+/**
+ * Disable day analysis mode
+ * - Removes previous day lines
+ * - Restores original visible range
+ */
+function disableDayAnalysis() {
+    // Remove reference lines
+    clearPreviousDayLines();
+
+    // Restore original visible range
+    if (savedVisibleRange && chart) {
+        try {
+            chart.timeScale().setVisibleRange(savedVisibleRange);
+            volumeChart.timeScale().setVisibleRange(savedVisibleRange);
+            console.log('Restored original visible range');
+        } catch (error) {
+            console.debug('Could not restore visible range, fitting content instead:', error);
+            chart.timeScale().fitContent();
+            volumeChart.timeScale().fitContent();
+        }
+        savedVisibleRange = null;
+    } else if (chart) {
+        // No saved range, just fit content
+        chart.timeScale().fitContent();
+        volumeChart.timeScale().fitContent();
+    }
+
+    console.log('Day analysis mode disabled');
 }
