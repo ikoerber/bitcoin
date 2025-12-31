@@ -19,4 +19,5 @@ urlpatterns = [
     path('api/engulfing/<str:timeframe>/', views.EngulfingPatternsView.as_view(), name='engulfing'),
     path('api/summary/', views.DataSummaryView.as_view(), name='summary'),
     path('api/update-database/', views.UpdateDatabaseView.as_view(), name='update-database'),
+    path('api/trading-performance/', views.TradingPerformanceView.as_view(), name='trading-performance'),
 ]

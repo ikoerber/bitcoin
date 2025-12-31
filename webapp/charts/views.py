@@ -22,6 +22,7 @@ from .serializers import (
     LatestPriceSerializer
 )
 from .indicators import TechnicalIndicators
+from .trading_performance import TradingPerformanceAnalyzer
 
 # Security: Maximum limit for data queries to prevent DoS
 MAX_QUERY_LIMIT = 10000
@@ -606,5 +607,124 @@ class TrendView(APIView):
             logger.error(f"Error detecting trend: {e}")
             return Response(
                 {'error': f'Error detecting trend: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class TradingPerformanceView(APIView):
+    """
+    GET /api/trading-performance/?days=90
+
+    Analyze personal trading performance from Binance account.
+
+    Parameters:
+        - days: Number of days to look back (default: 90, max: 365)
+
+    Returns:
+        JSON with trading performance metrics including:
+        - Total trades, buy/sell counts
+        - Volume in BTC and EUR
+        - Fees in BNB and EUR (converted)
+        - Realized P&L
+        - Win-rate and ROI
+        - Account balances
+
+    Requires:
+        - BINANCE_API_KEY and BINANCE_API_SECRET in environment variables
+        - Read-only API permissions
+    """
+
+    def get(self, request):
+        from django.conf import settings
+        from datetime import datetime, timedelta
+
+        # Check if API keys are configured
+        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
+            return Response(
+                {
+                    'error': 'Binance API keys not configured',
+                    'message': 'Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables in .env file'
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        # Get parameters
+        try:
+            days = int(request.GET.get('days', 90))
+            if days <= 0 or days > 365:
+                return Response(
+                    {'error': 'days must be between 1 and 365'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except ValueError:
+            return Response(
+                {'error': 'Invalid days parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Initialize analyzer
+            analyzer = TradingPerformanceAnalyzer()
+
+            # Calculate date range
+            since = datetime.now() - timedelta(days=days)
+
+            # Fetch trade history
+            logger.info(f"Fetching trade history for last {days} days")
+            trades = analyzer.fetch_trade_history(
+                symbol='BTC/EUR',
+                since=since,
+                limit=1000
+            )
+
+            if not trades:
+                return Response({
+                    'days': days,
+                    'total_trades': 0,
+                    'message': 'No trades found in the specified period'
+                })
+
+            # Get current BNB/EUR price
+            bnb_eur_price = analyzer.get_current_bnb_eur_price()
+
+            # Calculate performance metrics
+            logger.info(f"Calculating performance metrics for {len(trades)} trades")
+            metrics = analyzer.calculate_performance_metrics(trades, bnb_eur_price)
+
+            # Get account balance
+            try:
+                balance = analyzer.get_account_balance()
+            except Exception as e:
+                logger.warning(f"Could not fetch account balance: {e}")
+                balance = None
+
+            # Prepare response
+            return Response({
+                'period': {
+                    'days': days,
+                    'from': since.isoformat(),
+                    'to': datetime.now().isoformat()
+                },
+                'metrics': metrics,
+                'balance': balance,
+                'timestamp': datetime.now().isoformat()
+            })
+
+        except ValueError as e:
+            logger.error(f"Configuration error: {e}")
+            return Response(
+                {
+                    'error': 'Configuration error',
+                    'message': str(e)
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except Exception as e:
+            logger.error(f"Error analyzing trading performance: {e}", exc_info=True)
+            return Response(
+                {
+                    'error': 'Error analyzing trading performance',
+                    'message': str(e)
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

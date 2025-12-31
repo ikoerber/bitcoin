@@ -173,3 +173,18 @@ if CORS_ALLOW_ALL_ORIGINS:
         "WARNING: CORS_ALLOW_ALL_ORIGINS is True. This should only be used in development!",
         RuntimeWarning
     )
+
+
+# Binance API Configuration
+# SECURITY: API keys should be read-only with no trading permissions
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', '')
+BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', '')
+
+# Warn if API keys are not configured
+if not BINANCE_API_KEY or not BINANCE_API_SECRET:
+    import warnings
+    warnings.warn(
+        "WARNING: Binance API keys not configured. Trading performance features will be disabled. "
+        "Set BINANCE_API_KEY and BINANCE_API_SECRET environment variables.",
+        RuntimeWarning
+    )
