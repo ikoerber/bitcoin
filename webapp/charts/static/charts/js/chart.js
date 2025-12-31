@@ -884,6 +884,31 @@ async function enableDayAnalysis() {
             close: prevDayClose
         });
 
+        // Combine yesterday and today data for min/max calculation
+        const twoDaysData = [...yesterdayData, ...todayData];
+
+        // Calculate min and max prices from the last 2 days
+        let minPrice = Infinity;
+        let maxPrice = -Infinity;
+
+        twoDaysData.forEach(candle => {
+            if (candle.low < minPrice) minPrice = candle.low;
+            if (candle.high > maxPrice) maxPrice = candle.high;
+        });
+
+        // Add 1% padding for better visibility
+        const priceRange = maxPrice - minPrice;
+        const padding = priceRange * 0.01;
+        const paddedMin = minPrice - padding;
+        const paddedMax = maxPrice + padding;
+
+        console.log('Price range for last 2 days:', {
+            min: minPrice,
+            max: maxPrice,
+            paddedMin: paddedMin,
+            paddedMax: paddedMax
+        });
+
         // Draw horizontal lines for previous day open/close
         drawPreviousDayLines(prevDayOpen, prevDayClose, todayStartUnix);
 
@@ -891,6 +916,7 @@ async function enableDayAnalysis() {
         const visibleFrom = yesterdayStartUnix;
         const visibleTo = Math.floor(now.getTime() / 1000);
 
+        // Set time range
         chart.timeScale().setVisibleRange({
             from: visibleFrom,
             to: visibleTo
@@ -901,7 +927,35 @@ async function enableDayAnalysis() {
             to: visibleTo
         });
 
-        console.log('Day analysis mode enabled');
+        // Set price range to fit min/max perfectly
+        chart.priceScale('right').applyOptions({
+            autoScale: false,
+            scaleMargins: {
+                top: 0.01,
+                bottom: 0.01
+            }
+        });
+
+        // Use setVisibleLogicalRange to set the price scale
+        try {
+            candlestickSeries.priceScale().applyOptions({
+                autoScale: false
+            });
+
+            // Fit the visible price range
+            chart.timeScale().fitContent();
+
+            // Alternative: Use coordinateToPrice to set exact range
+            const priceScale = candlestickSeries.priceScale();
+            priceScale.applyOptions({
+                autoScale: false,
+                mode: 0, // Normal price scale
+            });
+        } catch (error) {
+            console.debug('Could not set price range precisely, using auto-fit:', error);
+        }
+
+        console.log('Day analysis mode enabled with optimized price scale');
 
     } catch (error) {
         console.error('Error enabling day analysis:', error);
@@ -992,10 +1046,28 @@ function clearPreviousDayLines() {
  * Disable day analysis mode
  * - Removes previous day lines
  * - Restores original visible range
+ * - Re-enables auto-scaling
  */
 function disableDayAnalysis() {
     // Remove reference lines
     clearPreviousDayLines();
+
+    // Re-enable auto-scaling for price axis
+    if (chart && candlestickSeries) {
+        try {
+            chart.priceScale('right').applyOptions({
+                autoScale: true
+            });
+
+            candlestickSeries.priceScale().applyOptions({
+                autoScale: true
+            });
+
+            console.log('Re-enabled auto-scaling for price axis');
+        } catch (error) {
+            console.debug('Error re-enabling auto-scale:', error);
+        }
+    }
 
     // Restore original visible range
     if (savedVisibleRange && chart) {
