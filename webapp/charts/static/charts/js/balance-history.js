@@ -202,53 +202,76 @@ function renderCharts() {
         }
     });
 
-    // 2. Individual Assets Chart
+    // 2. Stacked Bar Chart - Assets Composition
     assetsChart = new Chart(assetsChartCanvas, {
-        type: 'line',
+        type: 'bar',
         data: {
             labels: labels,
             datasets: [
                 {
                     label: 'EUR Balance',
                     data: balanceData.eur_balance,
+                    backgroundColor: '#4caf50',
                     borderColor: '#4caf50',
-                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.4,
-                    pointRadius: 2,
-                    pointHoverRadius: 5
+                    borderWidth: 1
                 },
                 {
                     label: 'BTC Wert (EUR)',
                     data: balanceData.btc_value_eur,
+                    backgroundColor: '#ff9800',
                     borderColor: '#ff9800',
-                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.4,
-                    pointRadius: 2,
-                    pointHoverRadius: 5
+                    borderWidth: 1
                 },
                 {
                     label: 'BNB Wert (EUR)',
                     data: balanceData.bnb_value_eur,
+                    backgroundColor: '#9c27b0',
                     borderColor: '#9c27b0',
-                    backgroundColor: 'rgba(156, 39, 176, 0.1)',
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.4,
-                    pointRadius: 2,
-                    pointHoverRadius: 5
+                    borderWidth: 1
                 }
             ]
         },
         options: {
             ...commonOptions,
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: { color: '#2a2e39' },
+                    ticks: { color: '#9598a1' }
+                },
+                y: {
+                    stacked: true,
+                    grid: { color: '#2a2e39' },
+                    ticks: {
+                        color: '#9598a1',
+                        callback: function(value) {
+                            return '€' + value.toLocaleString('de-DE');
+                        }
+                    }
+                }
+            },
             plugins: {
                 ...commonOptions.plugins,
                 title: {
                     display: false
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: '#131722',
+                    titleColor: '#d1d4dc',
+                    bodyColor: '#d1d4dc',
+                    borderColor: '#2a2e39',
+                    borderWidth: 1,
+                    callbacks: {
+                        footer: function(tooltipItems) {
+                            let total = 0;
+                            tooltipItems.forEach(item => {
+                                total += item.parsed.y;
+                            });
+                            return 'Gesamt: €' + total.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        }
+                    }
                 }
             }
         }

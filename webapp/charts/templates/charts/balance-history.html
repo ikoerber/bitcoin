@@ -19,13 +19,28 @@
             border-radius: 8px;
             padding: 20px;
             margin-bottom: 20px;
-            min-height: 400px;
+            height: 400px;
+            position: relative;
         }
 
         .chart-container h2 {
             color: #d1d4dc;
             margin-bottom: 15px;
             font-size: 18px;
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+        }
+
+        .chart-container canvas {
+            position: absolute;
+            top: 50px;
+            left: 20px;
+            right: 20px;
+            bottom: 20px;
+            width: calc(100% - 40px) !important;
+            height: calc(100% - 70px) !important;
         }
 
         .balance-table {
@@ -149,9 +164,9 @@
                 <canvas id="total-chart"></canvas>
             </div>
 
-            <!-- Individual Assets Chart -->
+            <!-- Stacked Assets Chart -->
             <div class="chart-container">
-                <h2>💰 Asset-Werte in EUR (über Zeit)</h2>
+                <h2>💰 Asset-Zusammensetzung pro Tag (gestapelt)</h2>
                 <canvas id="assets-chart"></canvas>
             </div>
 
