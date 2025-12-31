@@ -922,7 +922,7 @@ async function enableDayAnalysis() {
         const visibleFrom = yesterdayStartUnix;
         const visibleTo = Math.floor(now.getTime() / 1000);
 
-        // Set time range
+        // Set time range first
         chart.timeScale().setVisibleRange({
             from: visibleFrom,
             to: visibleTo
@@ -933,33 +933,24 @@ async function enableDayAnalysis() {
             to: visibleTo
         });
 
-        // Set price range to fit min/max perfectly
+        // Enable auto-scaling with tight margins to fit the 2-day price range
         chart.priceScale('right').applyOptions({
-            autoScale: false,
+            autoScale: true,
             scaleMargins: {
-                top: 0.01,
-                bottom: 0.01
+                top: 0.05,    // 5% padding at top
+                bottom: 0.05   // 5% padding at bottom
             }
         });
 
-        // Use setVisibleLogicalRange to set the price scale
-        try {
-            candlestickSeries.priceScale().applyOptions({
-                autoScale: false
-            });
+        candlestickSeries.priceScale().applyOptions({
+            autoScale: true,
+            scaleMargins: {
+                top: 0.05,
+                bottom: 0.05
+            }
+        });
 
-            // Fit the visible price range
-            chart.timeScale().fitContent();
-
-            // Alternative: Use coordinateToPrice to set exact range
-            const priceScale = candlestickSeries.priceScale();
-            priceScale.applyOptions({
-                autoScale: false,
-                mode: 0, // Normal price scale
-            });
-        } catch (error) {
-            console.debug('Could not set price range precisely, using auto-fit:', error);
-        }
+        console.log('Price scale set to auto-fit 2-day range with 5% margins');
 
         console.log('Day analysis mode enabled with optimized price scale');
 
