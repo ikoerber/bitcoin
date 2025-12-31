@@ -7,12 +7,15 @@ Provides:
 """
 
 import re
+import logging
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import render
 from django.db.models import Max, Min, Count
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from .models import get_model_for_timeframe, TIMEFRAME_MODELS
 from .serializers import (
