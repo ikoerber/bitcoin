@@ -243,6 +243,12 @@ async function updateLatestPrice(timeframe) {
  * @param {Object} response - API response with chart data
  */
 function updateChartInfo(response) {
+    // Don't update if day analysis is active (it manages its own display)
+    if (dayAnalysisEnabled) {
+        console.log('[updateChartInfo] Skipping - day analysis is active');
+        return;
+    }
+
     const countText = response.count.toLocaleString('de-DE');
 
     // Show if we hit the limit
@@ -957,6 +963,17 @@ async function enableDayAnalysis() {
 
         console.log('Day analysis mode enabled with optimized price scale');
 
+        // Update date range display to show only yesterday and today
+        const totalCandles = yesterdayData.length + todayData.length;
+        const dateRangeText = `${yesterdayStart.toLocaleDateString('de-DE')} - ${now.toLocaleDateString('de-DE')}`;
+
+        console.log('[enableDayAnalysis] Updating UI - Date range:', dateRangeText, 'Candles:', totalCandles);
+
+        document.getElementById('date-range').textContent = dateRangeText;
+        document.getElementById('candle-count').textContent = totalCandles.toLocaleString('de-DE');
+
+        console.log('[enableDayAnalysis] ✅ UI updated successfully');
+
     } catch (error) {
         console.error('Error enabling day analysis:', error);
         alert(`Fehler beim Aktivieren der Tagesanalyse:\n${error.message}`);
@@ -1049,6 +1066,10 @@ function clearPreviousDayLines() {
  * - Re-enables auto-scaling
  */
 function disableDayAnalysis() {
+    // Set flag to false
+    dayAnalysisEnabled = false;
+    console.log('[disableDayAnalysis] Day analysis disabled');
+
     // Remove reference lines
     clearPreviousDayLines();
 
@@ -1086,6 +1107,11 @@ function disableDayAnalysis() {
         chart.timeScale().fitContent();
         volumeChart.timeScale().fitContent();
     }
+
+    // Reload chart data to update UI with full date range
+    loadChartData(currentTimeframe, CANDLE_LIMIT).catch(error => {
+        console.error('Error reloading chart data after disabling day analysis:', error);
+    });
 
     console.log('Day analysis mode disabled');
 }
