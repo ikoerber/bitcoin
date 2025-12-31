@@ -276,6 +276,103 @@ class TradingPerformanceAnalyzer:
 
         return realized_pnl
 
+    def calculate_daily_performance(
+        self,
+        trades: List[Dict[str, Any]],
+        bnb_eur_price: float = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Calculate daily trading performance metrics grouped by day.
+
+        Args:
+            trades: List of trades from fetch_trade_history()
+            bnb_eur_price: Current BNB/EUR price (fetched if not provided)
+
+        Returns:
+            List of daily metrics, each containing:
+            - date: Date string (YYYY-MM-DD)
+            - total_trades: Number of trades on this day
+            - volume_btc: BTC volume traded
+            - volume_eur: EUR volume traded
+            - fees_bnb: Fees in BNB
+            - fees_eur: Fees in EUR (converted)
+            - realized_pnl_eur: Realized P&L for this day (FIFO)
+        """
+        if not trades:
+            return []
+
+        # Get current BNB price if not provided
+        if bnb_eur_price is None:
+            bnb_eur_price = self.get_current_bnb_eur_price()
+
+        # Group trades by date
+        from collections import defaultdict
+        daily_data = defaultdict(lambda: {
+            'buy_trades': [],
+            'sell_trades': [],
+            'fees_bnb': Decimal('0'),
+            'volume_btc': Decimal('0'),
+            'volume_eur': Decimal('0'),
+        })
+
+        for trade in trades:
+            # Convert timestamp to date
+            trade_date = datetime.fromtimestamp(trade['timestamp'] / 1000).date()
+            date_str = trade_date.strftime('%Y-%m-%d')
+
+            amount_btc = Decimal(str(trade['amount']))
+            price_eur = Decimal(str(trade['price']))
+            cost_eur = Decimal(str(trade['cost']))
+
+            daily_data[date_str]['volume_btc'] += amount_btc
+            daily_data[date_str]['volume_eur'] += cost_eur
+
+            # Fee handling
+            fee = trade.get('fee', {})
+            if fee and fee.get('currency') == 'BNB':
+                fee_amount = Decimal(str(fee['cost']))
+                daily_data[date_str]['fees_bnb'] += fee_amount
+
+            # Categorize trades
+            trade_info = {
+                'amount': amount_btc,
+                'price': price_eur,
+                'cost': cost_eur,
+                'timestamp': trade['timestamp']
+            }
+
+            if trade['side'] == 'buy':
+                daily_data[date_str]['buy_trades'].append(trade_info)
+            else:
+                daily_data[date_str]['sell_trades'].append(trade_info)
+
+        # Calculate metrics for each day
+        result = []
+        for date_str in sorted(daily_data.keys()):
+            day_info = daily_data[date_str]
+
+            # Calculate P&L for this day using FIFO
+            realized_pnl = self._calculate_fifo_pnl(
+                day_info['buy_trades'],
+                day_info['sell_trades']
+            )
+
+            fees_eur = float(day_info['fees_bnb']) * bnb_eur_price
+            total_trades = len(day_info['buy_trades']) + len(day_info['sell_trades'])
+
+            result.append({
+                'date': date_str,
+                'total_trades': total_trades,
+                'volume_btc': round(float(day_info['volume_btc']), 8),
+                'volume_eur': round(float(day_info['volume_eur']), 2),
+                'fees_bnb': round(float(day_info['fees_bnb']), 8),
+                'fees_eur': round(fees_eur, 2),
+                'realized_pnl_eur': round(float(realized_pnl), 2),
+                'realized_pnl_net_eur': round(float(realized_pnl) - fees_eur, 2),
+            })
+
+        return result
+
     def get_account_balance(self) -> Dict[str, Any]:
         """
         Get current account balances.

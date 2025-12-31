@@ -46,7 +46,7 @@ pip install ccxt pandas mplfinance numpy matplotlib
 ```bash
 cd webapp
 pip install -r requirements-webapp.txt
-# Includes: Django>=5.0.0, djangorestframework>=3.14.0, django-cors-headers>=4.3.0
+# Includes: Django>=5.0.0, djangorestframework>=3.14.0, django-cors-headers>=4.3.0, python-dotenv>=1.0.0
 ```
 
 ## Core Components
@@ -64,6 +64,8 @@ pip install -r requirements-webapp.txt
   - `models.py`: Unmanaged Django models (connects to existing database)
   - `views.py`: REST API endpoints and dashboard view
   - `indicators.py`: Technical indicators (RSI, SMA, EMA, Bollinger Bands)
+  - `trading_performance.py`: Trading performance analysis (Binance account data)
+  - `tests.py`: Comprehensive unit tests (24+ tests for trading performance)
   - `serializers.py`: Django REST Framework serializers
   - `templates/charts/dashboard.html`: Interactive web dashboard
   - `static/charts/`: CSS and JavaScript files
@@ -104,14 +106,18 @@ python manage.py runserver
 - `GET /api/ohlcv/<timeframe>/` - OHLCV candlestick data
 - `GET /api/latest-price/<timeframe>/` - Latest price with % change
 - `GET /api/indicators/<timeframe>/` - Technical indicators (RSI, SMA, EMA, Bollinger Bands)
+- `GET /api/trend/<timeframe>/` - Trend analysis (Higher Highs/Higher Lows swing points)
+- `GET /api/engulfing/<timeframe>/` - Bullish/Bearish engulfing candlestick patterns
 - `GET /api/summary/` - Database summary for all timeframes
 - `POST /api/update-database/` - Trigger database update from Binance (web-based)
+- `GET /api/trading-performance/` - Personal trading performance analysis (requires API keys)
 
 Parameters:
 - `timeframe`: 15m, 1h, 4h, 1d
 - `limit`: Number of candles (default: 500, max: 10000)
 - `indicator`: rsi, sma, ema, bb
 - `period`: Indicator period (14 for RSI, 20 for others)
+- `days`: Trading performance lookback period (1-365, default: 90)
 
 ## Development Notes
 
@@ -129,9 +135,15 @@ Parameters:
 ### Security & Configuration
 - **API Safety**: All API interactions are read-only (no trading functionality)
 - **Data Privacy**: Local SQLite storage, no API keys required for public market data
+- **Binance API Integration**: Optional trading performance analysis with read-only API keys
+  - API keys stored locally in `.env` file (never committed to Git)
+  - Required permissions: "Enable Reading" only
+  - **DO NOT enable**: Spot & Margin Trading, Futures, Withdrawals
+  - Automatic `.env` loading via python-dotenv
+  - Graceful degradation if API keys not configured
 - **Production Hardening**: Environment variable configuration system implemented
   - `.env.example` template provided in `webapp/` directory
-  - Configurable: SECRET_KEY, DEBUG, ALLOWED_HOSTS, CORS settings
+  - Configurable: SECRET_KEY, DEBUG, ALLOWED_HOSTS, CORS, BINANCE_API_KEY, BINANCE_API_SECRET
   - Security warnings for unsafe configurations (default SECRET_KEY, CORS_ALLOW_ALL)
   - See `webapp/SECURITY.md` for complete production deployment guide
 - **Input Validation**: All user inputs validated (CLI tools and Django views)
@@ -148,18 +160,46 @@ Parameters:
   - Interactive candlestick charts with native zoom/pan
   - Real-time price display with percentage change
   - Toggle technical indicators (RSI, SMA, EMA, Bollinger Bands)
+  - Candlestick pattern detection (Bullish/Bearish Engulfing)
+  - Trend analysis with swing point detection (Higher Highs/Higher Lows)
+  - Day analysis mode with auto-fit price scale (shows current + previous day)
   - Timeframe switching (15m, 1h, 4h, 1d)
-  - Candle limit selector (100-10000 candles for scrollable history)
+  - Fixed candle limit (10,000 candles for maximum scrollable history)
   - Auto-refresh functionality (60-second intervals)
   - Web-based database update button (📥 Daten von Binance laden)
+  - Trading performance analysis (optional, requires Binance API keys)
   - Responsive design for desktop and tablet
   - Comprehensive error handling with detailed console logging
 
-### Technical Indicators (Implemented in Webapp)
+### Technical Analysis Features (Implemented in Webapp)
+
+#### Technical Indicators
 - ✅ **RSI** (Relative Strength Index) - Period 14, division-by-zero safe
 - ✅ **SMA** (Simple Moving Average) - Period 20
 - ✅ **EMA** (Exponential Moving Average) - Period 20
 - ✅ **Bollinger Bands** - Period 20, Std Dev 2.0
+
+#### Candlestick Patterns
+- ✅ **Bullish Engulfing** - Current candle completely engulfs previous down candle
+- ✅ **Bearish Engulfing** - Current candle completely engulfs previous up candle
+- Real-time pattern detection with visual markers on chart
+
+#### Trend Analysis (Smart Money Concepts)
+- ✅ **Higher Highs (HH)** - Uptrend swing point detection
+- ✅ **Higher Lows (HL)** - Uptrend support level identification
+- ✅ **Lower Highs (LH)** - Downtrend resistance level identification
+- ✅ **Lower Lows (LL)** - Downtrend swing point detection
+- Visual markers with color-coded labels (green for uptrend, red for downtrend)
+
+#### Trading Performance Analysis
+- ✅ **P&L Calculation** - FIFO (First-In-First-Out) algorithm for realized profit/loss
+- ✅ **Fee Analysis** - BNB trading fees converted to EUR at current exchange rate
+- ✅ **Win-Rate Calculation** - Percentage comparison of average buy vs sell prices
+- ✅ **ROI Metrics** - Return on investment (gross and net after fees)
+- ✅ **Account Balances** - Current BTC, EUR, and BNB holdings
+- ✅ **Trade Statistics** - Total trades, buy/sell breakdown, volume analysis
+- API endpoint: `GET /api/trading-performance/?days=90`
+- Requires Binance read-only API keys in `.env` file
 
 ### Code Quality & Stability Improvements
 - ✅ **Database Context Managers**: All SQLite operations use `with` statements for guaranteed cleanup
@@ -174,14 +214,19 @@ Parameters:
 - ~~Technical indicators (RSI, MA, Bollinger Bands) implementation~~ ✅ Completed
 - ~~Web-based database update functionality~~ ✅ Completed
 - ~~Security hardening and production configuration~~ ✅ Completed
+- ~~Candlestick pattern detection (Engulfing)~~ ✅ Completed
+- ~~Trend analysis (Higher Highs/Higher Lows)~~ ✅ Completed
+- ~~Trading performance analysis with Binance API~~ ✅ Completed
+- ~~Unit tests for trading performance backend~~ ✅ Completed
+- Frontend dashboard for trading performance visualization
 - Alert system for price pattern notifications
 - Backtesting framework for strategy validation
 - Additional indicators (MACD, Stochastic, Fibonacci)
-- Pattern recognition integration (from strategy.py)
+- More candlestick patterns (Doji, Hammer, Shooting Star, etc.)
 - Export functionality (charts as PNG, data as CSV)
 - WebSocket integration for real-time updates
 - Multi-asset support (other crypto pairs)
-- Unit tests for CLI tools and webapp components
+- Unit tests for CLI tools
 
 ## Project Structure
 
@@ -196,29 +241,33 @@ bitcoin/
 ├── CLAUDE.md                 # This file (AI assistant guide)
 ├── README.md                 # CLI tools documentation
 ├── IMPROVEMENTS.md           # Detailed changelog of code improvements
+├── TESTING.md                # Testing guide for trading performance backend
 └── webapp/                   # Django Web Application
     ├── manage.py             # Django management
-    ├── requirements-webapp.txt   # Webapp dependencies
+    ├── requirements-webapp.txt   # Webapp dependencies (includes python-dotenv)
     ├── README.md             # Webapp documentation
     ├── QUICKSTART.md         # Quick start guide
     ├── SECURITY.md           # Production security configuration guide
-    ├── .env.example          # Environment variables template
+    ├── .env.example          # Environment variables template (includes BINANCE_API_KEY)
+    ├── .env                  # Local environment config (gitignored, user-created)
     ├── bitcoin_webapp/       # Django project settings
-    │   ├── settings.py       # Configuration (env vars, security)
+    │   ├── settings.py       # Configuration (env vars, security, dotenv loading)
     │   ├── urls.py           # Main URL routing
     │   └── wsgi.py/asgi.py   # Server configs
     └── charts/               # Django app
         ├── models.py         # Unmanaged models (4 timeframes)
-        ├── views.py          # REST API + dashboard view
+        ├── views.py          # REST API + dashboard view + trading performance
         ├── indicators.py     # Technical indicators (RSI, SMA, EMA, BB)
+        ├── trading_performance.py  # Trading performance analyzer (FIFO P&L, BNB fees)
+        ├── tests.py          # Unit tests (24+ tests with mocks)
         ├── serializers.py    # DRF serializers
         ├── urls.py           # App URL routing
         ├── templates/charts/
-        │   └── dashboard.html    # Main dashboard UI
+        │   └── dashboard.html    # Main dashboard UI (indicators, patterns, trends)
         └── static/charts/
             ├── css/style.css     # Dark theme styling
             └── js/
-                ├── chart.js      # TradingView Lightweight Charts
+                ├── chart.js      # TradingView Lightweight Charts + patterns + trends
                 ├── indicators.js # Indicator management
                 └── api.js        # API interaction layer
 ```
@@ -265,9 +314,48 @@ python manage.py runserver
 - **Development Mode**: Default configuration ready for local development (DEBUG=True)
 - **Production Deployment**: See `webapp/SECURITY.md` for complete security checklist
 - **Code Quality**: All improvements documented in `IMPROVEMENTS.md`
-- **Environment Configuration**: Copy `webapp/.env.example` to `webapp/.env` for custom settings
+- **Environment Configuration**:
+  - Copy `webapp/.env.example` to `webapp/.env` for custom settings
+  - Add Binance API keys to `.env` for trading performance features
+  - `.env` is gitignored and never committed to repository
+- **Testing**:
+  - See `TESTING.md` for complete testing guide
+  - Run tests: `cd webapp && python3 manage.py test charts.tests`
+  - 24+ unit tests with full mocking (no real API calls needed)
 - **Documentation**:
   - `webapp/README.md` - Detailed webapp documentation
   - `webapp/QUICKSTART.md` - Quick start guide
   - `webapp/SECURITY.md` - Production security guide
+  - `TESTING.md` - Testing guide for trading performance
   - `IMPROVEMENTS.md` - Complete changelog with examples
+
+## Trading Performance Analysis
+
+### Setup
+1. Get Binance read-only API keys: https://www.binance.com/en/my/settings/api-management
+2. Enable **only** "Enable Reading" permission
+3. **DO NOT enable**: Spot & Margin Trading, Futures, Withdrawals
+4. Add keys to `webapp/.env`:
+   ```
+   BINANCE_API_KEY=your-api-key-here
+   BINANCE_API_SECRET=your-api-secret-here
+   ```
+5. Restart Django server
+
+### Usage
+```bash
+# Via curl
+curl http://localhost:8000/api/trading-performance/?days=30
+
+# Or access via browser/JavaScript fetch
+fetch('/api/trading-performance/?days=90')
+```
+
+### Metrics Provided
+- **Realized P&L**: FIFO-matched profit/loss in EUR
+- **Net P&L**: P&L minus trading fees (BNB converted to EUR)
+- **Win-Rate**: Average sell price vs average buy price percentage
+- **ROI**: Return on investment (gross and net)
+- **Trade Statistics**: Total trades, buy/sell counts, volume
+- **Account Balances**: Current BTC, EUR, BNB holdings
+- **Fee Analysis**: Total BNB fees converted to EUR at current rate

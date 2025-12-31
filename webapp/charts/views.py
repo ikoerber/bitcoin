@@ -616,21 +616,27 @@ class TrendView(APIView):
 
 class TradingPerformanceView(APIView):
     """
-    GET /api/trading-performance/?days=90
+    GET /api/trading-performance/?days=90&groupby=day
 
     Analyze personal trading performance from Binance account.
 
     Parameters:
         - days: Number of days to look back (default: 90, max: 365)
+        - groupby: Optional grouping ('day' for daily breakdown)
 
-    Returns:
-        JSON with trading performance metrics including:
+    Returns (without groupby):
+        JSON with overall trading performance metrics:
         - Total trades, buy/sell counts
         - Volume in BTC and EUR
         - Fees in BNB and EUR (converted)
         - Realized P&L
         - Win-rate and ROI
         - Account balances
+
+    Returns (with groupby=day):
+        JSON with daily breakdown:
+        - Array of daily metrics (date, trades, volume, fees, P&L)
+        - Each day's realized P&L calculated using FIFO
 
     Requires:
         - BINANCE_API_KEY and BINANCE_API_SECRET in environment variables
@@ -665,6 +671,14 @@ class TradingPerformanceView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Get groupby parameter
+        groupby = request.GET.get('groupby', None)
+        if groupby and groupby not in ['day']:
+            return Response(
+                {'error': 'groupby must be "day" (other options coming soon)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         try:
             # Initialize analyzer
             analyzer = TradingPerformanceAnalyzer()
@@ -690,7 +704,25 @@ class TradingPerformanceView(APIView):
             # Get current BNB/EUR price
             bnb_eur_price = analyzer.get_current_bnb_eur_price()
 
-            # Calculate performance metrics
+            # Check if daily grouping is requested
+            if groupby == 'day':
+                # Calculate daily performance
+                logger.info(f"Calculating daily performance metrics for {len(trades)} trades")
+                daily_metrics = analyzer.calculate_daily_performance(trades, bnb_eur_price)
+
+                return Response({
+                    'period': {
+                        'days': days,
+                        'from': since.isoformat(),
+                        'to': datetime.now().isoformat(),
+                        'groupby': 'day'
+                    },
+                    'daily_data': daily_metrics,
+                    'total_days': len(daily_metrics),
+                    'timestamp': datetime.now().isoformat()
+                })
+
+            # Calculate overall performance metrics
             logger.info(f"Calculating performance metrics for {len(trades)} trades")
             metrics = analyzer.calculate_performance_metrics(trades, bnb_eur_price)
 
