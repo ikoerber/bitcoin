@@ -15,6 +15,9 @@ let isLoadingMore = false;
 let allDataLoaded = false;
 let currentDataLength = 0;
 
+// Fixed candle limit - always use maximum
+const CANDLE_LIMIT = 10000;
+
 // Gap visualization
 let gapsEnabled = false;
 let gapType = 'regular';  // 'regular' or 'fvg'
@@ -247,11 +250,9 @@ async function updateLatestPrice(timeframe) {
  */
 function updateChartInfo(response) {
     const countText = response.count.toLocaleString('de-DE');
-    const limitElement = document.getElementById('candle-limit');
-    const limit = parseInt(limitElement.value);
 
     // Show if we hit the limit
-    const limitInfo = response.count >= limit ? ` (max ${limit})` : '';
+    const limitInfo = response.count >= CANDLE_LIMIT ? ` (max)` : '';
     document.getElementById('candle-count').textContent = countText + limitInfo;
 
     if (response.data.length > 0) {
@@ -284,7 +285,6 @@ function hideLoading() {
  */
 async function onTimeframeChange(timeframe) {
     currentTimeframe = timeframe;
-    const limit = parseInt(document.getElementById('candle-limit').value);
 
     // Save current visible time range to restore after loading new data
     let visibleRange = null;
@@ -294,7 +294,7 @@ async function onTimeframeChange(timeframe) {
         console.debug('Could not save visible range:', error);
     }
 
-    await loadChartData(timeframe, limit, visibleRange);
+    await loadChartData(timeframe, CANDLE_LIMIT, visibleRange);
 
     // Reload active indicators
     const indicators = getActiveIndicators();
@@ -320,21 +320,6 @@ async function onTimeframeChange(timeframe) {
     }
 }
 
-/**
- * Handle candle limit change event
- */
-async function onCandleLimitChange() {
-    const limit = parseInt(document.getElementById('candle-limit').value);
-    await loadChartData(currentTimeframe, limit);
-
-    // Reload active indicators
-    const indicators = getActiveIndicators();
-    for (const [indicator, checkbox] of Object.entries(indicators)) {
-        if (checkbox.checked) {
-            await toggleIndicator(indicator, true);
-        }
-    }
-}
 
 /**
  * Get all indicator checkbox elements
@@ -392,7 +377,7 @@ function toggleAutoRefresh() {
     } else {
         autoRefreshInterval = setInterval(async () => {
             console.log('Auto-refreshing data...');
-            await loadChartData(currentTimeframe);
+            await loadChartData(currentTimeframe, CANDLE_LIMIT);
 
             // Reload active indicators
             const indicators = getActiveIndicators();
@@ -418,11 +403,6 @@ function initEventListeners() {
         onTimeframeChange(e.target.value);
     });
 
-    // Candle limit selector
-    document.getElementById('candle-limit').addEventListener('change', () => {
-        onCandleLimitChange();
-    });
-
     // Indicator toggles
     const indicators = getActiveIndicators();
     for (const [indicator, checkbox] of Object.entries(indicators)) {
@@ -433,7 +413,7 @@ function initEventListeners() {
 
     // Refresh button
     document.getElementById('refresh-btn').addEventListener('click', async () => {
-        await loadChartData(currentTimeframe);
+        await loadChartData(currentTimeframe, CANDLE_LIMIT);
 
         // Reload active indicators
         const indicators = getActiveIndicators();
@@ -506,8 +486,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('Step 2: Initializing event listeners...');
         initEventListeners();
 
-        console.log('Step 3: Loading chart data for timeframe:', currentTimeframe);
-        await loadChartData(currentTimeframe);
+        console.log('Step 3: Loading chart data for timeframe:', currentTimeframe, 'with limit:', CANDLE_LIMIT);
+        await loadChartData(currentTimeframe, CANDLE_LIMIT);
 
         console.log('Dashboard ready!');
     } catch (error) {
@@ -563,7 +543,7 @@ async function toggleGapType() {
  */
 async function loadAndDisplayGaps() {
     try {
-        const limit = parseInt(document.getElementById('candle-limit').value) || 2000;
+        const limit = CANDLE_LIMIT;
         const response = await fetch(`/api/gaps/${currentTimeframe}/?gap_type=${gapType}&min_gap=0.1&limit=${limit}`);
 
         if (!response.ok) {
@@ -689,7 +669,7 @@ async function toggleEngulfing() {
  */
 async function loadAndDisplayEngulfing() {
     try {
-        const limit = parseInt(document.getElementById('candle-limit').value) || 2000;
+        const limit = CANDLE_LIMIT;
         const response = await fetch(`/api/engulfing/${currentTimeframe}/?limit=${limit}`);
 
         if (!response.ok) {
@@ -717,8 +697,6 @@ function displayEngulfingMarkers(patterns) {
         return;
     }
 
-    clearEngulfing();
-
     // Convert patterns to TradingView markers format
     const markers = patterns.map(pattern => {
         const isBullish = pattern.pattern_type === 'bullish_engulfing';
@@ -733,11 +711,18 @@ function displayEngulfingMarkers(patterns) {
         };
     });
 
-    // Set markers on the candlestick series
-    candlestickSeries.setMarkers(markers);
+    // Get existing markers and filter out old engulfing markers
+    const existingMarkers = candlestickSeries.markers() || [];
+    const filteredExisting = existingMarkers.filter(m => m.text !== 'BE');
+
+    // Combine filtered existing with new engulfing markers
+    const combinedMarkers = [...filteredExisting, ...markers];
+
+    // Set combined markers on the candlestick series
+    candlestickSeries.setMarkers(combinedMarkers);
     engulfingMarkers = patterns;
 
-    console.log(`Displayed ${markers.length} engulfing pattern markers on chart`);
+    console.log(`Displayed ${markers.length} engulfing pattern markers on chart (total markers: ${combinedMarkers.length})`);
 }
 
 /**
@@ -746,11 +731,14 @@ function displayEngulfingMarkers(patterns) {
 function clearEngulfing() {
     if (!candlestickSeries) return;
 
-    // Clear markers by setting empty array
-    candlestickSeries.setMarkers([]);
+    // Remove only engulfing markers (keep other markers like swing points)
+    const existingMarkers = candlestickSeries.markers() || [];
+    const filteredMarkers = existingMarkers.filter(m => m.text !== 'BE');
+
+    candlestickSeries.setMarkers(filteredMarkers);
     engulfingMarkers = [];
 
-    console.log('Cleared all engulfing pattern markers from chart');
+    console.log('Cleared engulfing pattern markers from chart (kept other markers)');
 }
 
 /**
@@ -776,7 +764,7 @@ async function toggleTrend() {
  */
 async function loadAndDisplayTrend() {
     try {
-        const limit = parseInt(document.getElementById('candle-limit').value) || 2000;
+        const limit = CANDLE_LIMIT;
         const lookback = 5;  // Default lookback window
         const minMove = 0.5;  // Minimum 0.5% move between swings
 
