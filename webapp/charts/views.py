@@ -929,3 +929,74 @@ class SyncAssetHistoryView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class SyncOpenOrdersView(APIView):
+    """
+    API endpoint to synchronize currently open orders from Binance.
+
+    GET /api/sync-open-orders/
+        Fetches all currently open limit orders and stores them in database.
+        Replaces previous data to always show current state.
+
+    Query parameters:
+        - symbol: Trading pair (default: BTC/EUR)
+
+    Returns:
+        JSON with open orders statistics:
+        - total_open_orders: Total number of open orders
+        - buy_orders: Number of buy orders
+        - sell_orders: Number of sell orders
+        - buy_amount_btc: Total BTC in buy orders
+        - sell_amount_btc: Total BTC in sell orders
+
+    Requires:
+        - BINANCE_API_KEY and BINANCE_API_SECRET in environment variables
+        - Read-only API permissions
+    """
+
+    def get(self, request):
+        from django.conf import settings
+
+        # Check if API keys are configured
+        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
+            return Response(
+                {
+                    'error': 'Binance API keys not configured',
+                    'message': 'Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables in .env file'
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        # Get parameters
+        symbol = request.GET.get('symbol', 'BTC/EUR')
+
+        try:
+            # Initialize analyzer
+            analyzer = TradingPerformanceAnalyzer()
+
+            # Sync open orders
+            logger.info(f"Syncing open orders for {symbol}")
+            sync_result = analyzer.sync_open_orders_to_database(symbol=symbol)
+
+            logger.info(f"Open orders sync complete: {sync_result}")
+
+            return Response(sync_result)
+
+        except ValueError as e:
+            return Response(
+                {
+                    'error': 'Configuration error',
+                    'message': str(e)
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except Exception as e:
+            logger.error(f"Error syncing open orders: {e}", exc_info=True)
+            return Response(
+                {
+                    'error': 'Error syncing open orders',
+                    'message': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

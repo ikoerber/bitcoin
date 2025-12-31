@@ -707,6 +707,105 @@ class TradingPerformanceAnalyzer:
                 'sync_timestamp': datetime.now().isoformat()
             }
 
+    def sync_open_orders_to_database(
+        self,
+        symbol: str = 'BTC/EUR',
+        db_path: str = None
+    ) -> Dict[str, Any]:
+        """
+        Synchronize currently open orders from Binance to database.
+
+        This replaces all orders in the database with current open orders.
+
+        Args:
+            symbol: Trading pair (default: BTC/EUR)
+            db_path: Path to SQLite database
+
+        Returns:
+            Dictionary with sync statistics
+        """
+        import os
+
+        if db_path is None:
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            db_path = os.path.join(project_root, 'btc_eur_data.db')
+
+        logger.info(f"Syncing open orders for {symbol}")
+
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+
+            # Fetch open orders from Binance
+            try:
+                open_orders = self.exchange.fetch_open_orders(symbol=symbol)
+                logger.info(f"Fetched {len(open_orders)} open orders from Binance")
+
+                # Clear old orders for this symbol
+                cursor.execute("DELETE FROM open_orders WHERE symbol = ?", (symbol,))
+
+                # Insert current open orders
+                orders_synced = 0
+                for order in open_orders:
+                    try:
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO open_orders (
+                                order_id, symbol, timestamp, datetime,
+                                type, side, price, amount, filled, remaining, status
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            str(order['id']),
+                            order['symbol'],
+                            order['timestamp'],
+                            datetime.fromtimestamp(order['timestamp'] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                            order['type'],
+                            order['side'],
+                            float(order['price']) if order['price'] else 0,
+                            float(order['amount']),
+                            float(order.get('filled', 0)),
+                            float(order.get('remaining', order['amount'])),
+                            order['status']
+                        ))
+
+                        orders_synced += 1
+
+                    except Exception as e:
+                        logger.warning(f"Failed to insert order {order.get('id')}: {e}")
+                        continue
+
+                conn.commit()
+
+                # Get statistics
+                cursor.execute("""
+                    SELECT side, COUNT(*), SUM(remaining)
+                    FROM open_orders
+                    WHERE symbol = ?
+                    GROUP BY side
+                """, (symbol,))
+
+                stats_by_side = {}
+                for row in cursor.fetchall():
+                    stats_by_side[row[0]] = {
+                        'count': row[1],
+                        'total_amount': float(row[2])
+                    }
+
+                logger.info(f"Sync complete: {orders_synced} open orders")
+
+                return {
+                    'status': 'success',
+                    'symbol': symbol,
+                    'total_open_orders': orders_synced,
+                    'buy_orders': stats_by_side.get('buy', {}).get('count', 0),
+                    'sell_orders': stats_by_side.get('sell', {}).get('count', 0),
+                    'buy_amount_btc': stats_by_side.get('buy', {}).get('total_amount', 0),
+                    'sell_amount_btc': stats_by_side.get('sell', {}).get('total_amount', 0),
+                    'sync_timestamp': datetime.now().isoformat()
+                }
+
+            except Exception as e:
+                logger.error(f"Error syncing open orders: {e}")
+                raise
+
     def calculate_performance_metrics(
         self,
         trades: List[Dict[str, Any]],

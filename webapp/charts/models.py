@@ -367,3 +367,110 @@ class AssetTransaction(models.Model):
     def datetime_str(self):
         """Human-readable datetime string"""
         return self.datetime.strftime('%Y-%m-%d %H:%M:%S')
+
+
+class OpenOrder(models.Model):
+    """
+    Model for storing currently open limit orders from Binance.
+    
+    This table is refreshed on each sync to show current open orders.
+    """
+    
+    # Order types
+    ORDER_TYPES = [
+        ('limit', 'Limit'),
+        ('market', 'Market'),
+        ('stop_loss', 'Stop Loss'),
+        ('stop_loss_limit', 'Stop Loss Limit'),
+    ]
+    
+    # Primary key: Binance order ID
+    order_id = models.CharField(
+        max_length=50,
+        primary_key=True,
+        help_text="Binance order ID"
+    )
+    
+    symbol = models.CharField(
+        max_length=20,
+        default='BTC/EUR',
+        db_index=True,
+        help_text="Trading pair symbol"
+    )
+    
+    timestamp = models.BigIntegerField(
+        db_index=True,
+        help_text="Order creation timestamp (milliseconds)"
+    )
+    
+    datetime = models.DateTimeField(
+        help_text="Human-readable datetime"
+    )
+    
+    type = models.CharField(
+        max_length=20,
+        choices=ORDER_TYPES,
+        help_text="Order type"
+    )
+    
+    side = models.CharField(
+        max_length=4,
+        choices=[('buy', 'Buy'), ('sell', 'Sell')],
+        db_index=True,
+        help_text="Order side"
+    )
+    
+    price = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        help_text="Limit price"
+    )
+    
+    amount = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        help_text="Total order amount"
+    )
+    
+    filled = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        default=0,
+        help_text="Filled amount"
+    )
+    
+    remaining = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        help_text="Remaining amount to fill"
+    )
+    
+    status = models.CharField(
+        max_length=20,
+        default='open',
+        help_text="Order status"
+    )
+    
+    synced_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this order was synced"
+    )
+    
+    class Meta:
+        db_table = 'open_orders'
+        ordering = ['-timestamp']
+        verbose_name = 'Open Order'
+        verbose_name_plural = 'Open Orders'
+        indexes = [
+            models.Index(fields=['symbol']),
+            models.Index(fields=['side']),
+            models.Index(fields=['-timestamp']),
+        ]
+    
+    def __str__(self):
+        return f"{self.side.upper()} {self.remaining}/{self.amount} BTC @ €{self.price}"
+    
+    @property
+    def datetime_str(self):
+        """Human-readable datetime string"""
+        return self.datetime.strftime('%Y-%m-%d %H:%M:%S')

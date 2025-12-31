@@ -22,4 +22,5 @@ urlpatterns = [
     path('api/trading-performance/', views.TradingPerformanceView.as_view(), name='trading-performance'),
     path('api/sync-trades/', views.SyncTradesView.as_view(), name='sync-trades'),
     path('api/sync-asset-history/', views.SyncAssetHistoryView.as_view(), name='sync-asset-history'),
+    path('api/sync-open-orders/', views.SyncOpenOrdersView.as_view(), name='sync-open-orders'),
 ]
