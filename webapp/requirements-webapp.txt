@@ -3,6 +3,7 @@
 
 Django>=5.0.0
 djangorestframework>=3.14.0
+python-dotenv>=1.0.0
 
 # Data analysis and technical indicators
 pandas>=2.0.0
@@ -13,3 +14,6 @@ ccxt>=4.0.0
 
 # CORS headers for development
 django-cors-headers>=4.3.0
+
+# Background task scheduler (no Redis/RabbitMQ required)
+APScheduler>=3.10.0

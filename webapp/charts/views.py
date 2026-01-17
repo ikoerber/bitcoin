@@ -27,9 +27,30 @@ from .serializers import (
 from .indicators import TechnicalIndicators
 from .trading_performance import TradingPerformanceAnalyzer
 
-# Security: Maximum limit for data queries to prevent DoS
-MAX_QUERY_LIMIT = 10000
-DEFAULT_LIMIT = 500
+# Import refactored utilities and constants
+from .constants import (
+    MAX_QUERY_LIMIT,
+    DEFAULT_LIMIT,
+    DEFAULT_DAYS,
+    MIN_DAYS,
+    MAX_DAYS,
+    RSI_DEFAULT_PERIOD,
+    MA_DEFAULT_PERIOD,
+    BB_DEFAULT_PERIOD,
+    MIN_INDICATOR_PERIOD,
+    MAX_INDICATOR_PERIOD
+)
+from .utils import (
+    require_binance_api_keys,
+    error_response,
+    success_response,
+    get_limit_param,
+    get_days_param,
+    get_period_param,
+    validate_timeframe,
+    validate_indicator_type
+)
+from .base_views import BinanceSyncBaseView
 
 
 # ==================== FRONTEND VIEW ====================
@@ -506,132 +527,6 @@ class UpdateDatabaseView(APIView):
             )
 
 
-class TrendView(APIView):
-    """
-    GET /api/trend/<timeframe>/?lookback=5&min_move=0.5&limit=500
-
-    Detect trend direction using Higher Highs/Higher Lows methodology.
-
-    Parameters:
-        - timeframe: 15m, 1h, 4h, 1d
-        - lookback: Swing point detection window (default: 5, range: 3-20)
-        - min_move: Minimum % move between swings (default: 0.5%)
-        - limit: Number of candles to analyze (default: 500, max: 10000)
-
-    Returns:
-        JSON with trend_type, trendline coordinates, swing points, and statistics
-    """
-
-    def get(self, request, timeframe):
-        # Validate timeframe
-        if timeframe not in TIMEFRAME_MODELS:
-            return Response(
-                {'error': f'Invalid timeframe: {timeframe}'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Validate lookback parameter
-        try:
-            lookback = int(request.GET.get('lookback', 5))
-            if lookback < 3 or lookback > 20:
-                return Response(
-                    {'error': 'lookback must be between 3 and 20'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        except ValueError:
-            return Response(
-                {'error': 'Invalid lookback parameter. Must be an integer.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Validate min_move parameter
-        try:
-            min_move = float(request.GET.get('min_move', 0.5))
-            if min_move < 0 or min_move > 10:
-                return Response(
-                    {'error': 'min_move must be between 0 and 10'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        except ValueError:
-            return Response(
-                {'error': 'Invalid min_move parameter. Must be a number.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Validate limit parameter
-        try:
-            limit = int(request.GET.get('limit', 500))
-            if limit <= 0:
-                return Response(
-                    {'error': 'Limit must be a positive integer'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            limit = min(limit, MAX_QUERY_LIMIT)
-        except ValueError:
-            return Response(
-                {'error': 'Invalid limit parameter. Must be an integer.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Fetch OHLCV data
-        model = TIMEFRAME_MODELS[timeframe]
-        queryset = model.objects.order_by('-timestamp')[:limit]
-
-        if not queryset.exists():
-            return Response(
-                {'error': 'No data available'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # Convert to DataFrame
-        data = list(queryset.values('timestamp', 'open', 'high', 'low', 'close', 'volume'))
-        data.reverse()  # Chronological order
-        df = pd.DataFrame(data)
-
-        # Validate sufficient data
-        min_required = 2 * lookback + 3
-        if len(df) < min_required:
-            return Response(
-                {
-                    'error': f'Insufficient data. Need at least {min_required} candles.',
-                    'available': len(df),
-                    'required': min_required
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Detect trend
-        calc = TechnicalIndicators()
-
-        try:
-            trend_data = calc.detect_trend(df, lookback=lookback, min_move_percent=min_move)
-
-            return Response({
-                'timeframe': timeframe,
-                'lookback': lookback,
-                'min_move_percent': min_move,
-                'trend_type': trend_data['trend_type'],
-                'confidence': trend_data['confidence'],
-                'trendline_points': trend_data['trendline_points'],
-                'swing_points': trend_data['swing_points'],
-                'statistics': {
-                    'swing_highs': trend_data['swing_highs_count'],
-                    'swing_lows': trend_data['swing_lows_count'],
-                    'higher_highs': trend_data['higher_high_count'],
-                    'lower_highs': trend_data['lower_high_count'],
-                    'higher_lows': trend_data['higher_low_count'],
-                    'lower_lows': trend_data['lower_low_count']
-                }
-            })
-
-        except Exception as e:
-            logger.error(f"Error detecting trend: {e}")
-            return Response(
-                {'error': f'Error detecting trend: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
 class TradingPerformanceView(APIView):
     """
     GET /api/trading-performance/?days=90&groupby=day
@@ -661,33 +556,14 @@ class TradingPerformanceView(APIView):
         - Read-only API permissions
     """
 
+    @require_binance_api_keys
     def get(self, request):
-        from django.conf import settings
         from datetime import datetime, timedelta
 
-        # Check if API keys are configured
-        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
-            return Response(
-                {
-                    'error': 'Binance API keys not configured',
-                    'message': 'Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables in .env file'
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
-            )
-
-        # Get parameters
-        try:
-            days = int(request.GET.get('days', 90))
-            if days <= 0 or days > 365:
-                return Response(
-                    {'error': 'days must be between 1 and 365'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        except ValueError:
-            return Response(
-                {'error': 'Invalid days parameter. Must be an integer.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # Get and validate parameters
+        days, error = get_days_param(request, default=90, min_days=1, max_days=365)
+        if error:
+            return error
 
         # Get groupby parameter
         groupby = request.GET.get('groupby', None)
@@ -782,7 +658,7 @@ class TradingPerformanceView(APIView):
             )
 
 
-class SyncTradesView(APIView):
+class SyncTradesView(BinanceSyncBaseView):
     """
     API endpoint to synchronize trades from Binance to local database.
 
@@ -805,70 +681,27 @@ class SyncTradesView(APIView):
         - Read-only API permissions
     """
 
-    def get(self, request):
-        from django.conf import settings
+    sync_method_name = 'sync_trades_to_database'
 
-        # Check if API keys are configured
-        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
-            return Response(
-                {
-                    'error': 'Binance API keys not configured',
-                    'message': 'Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables in .env file'
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
-            )
+    def get_sync_params(self, request):
+        """Extract parameters for trade sync."""
+        from datetime import datetime, timedelta
 
-        # Get parameters
         symbol = request.GET.get('symbol', 'BTC/EUR')
         full_sync = request.GET.get('full_sync', 'false').lower() == 'true'
 
-        try:
-            # Initialize analyzer
-            analyzer = TradingPerformanceAnalyzer()
+        # Determine sync start date
+        since = None
+        if full_sync:
+            since = datetime.now() - timedelta(days=365)
 
-            # Determine sync start date
-            since = None
-            if full_sync:
-                # Force full sync from 1 year ago
-                from datetime import datetime, timedelta
-                since = datetime.now() - timedelta(days=365)
-                logger.info(f"Full sync requested: fetching all trades since {since}")
-
-            # Sync trades to database
-            logger.info(f"Starting trade synchronization for {symbol}")
-            sync_result = analyzer.sync_trades_to_database(
-                symbol=symbol,
-                since=since
-            )
-
-            logger.info(f"Trade sync complete: {sync_result}")
-
-            return Response({
-                'status': 'success',
-                'sync_type': 'full' if full_sync else 'incremental',
-                **sync_result
-            })
-
-        except ValueError as e:
-            return Response(
-                {
-                    'error': 'Configuration error',
-                    'message': str(e)
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
-            )
-        except Exception as e:
-            logger.error(f"Error syncing trades: {e}", exc_info=True)
-            return Response(
-                {
-                    'error': 'Error syncing trades',
-                    'message': str(e)
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        return {
+            'symbol': symbol,
+            'since': since
+        }
 
 
-class SyncAssetHistoryView(APIView):
+class SyncAssetHistoryView(BinanceSyncBaseView):
     """
     API endpoint to synchronize asset history (deposits, withdrawals, converts).
 
@@ -891,65 +724,23 @@ class SyncAssetHistoryView(APIView):
         - Read-only API permissions
     """
 
-    def get(self, request):
-        from django.conf import settings
+    sync_method_name = 'sync_asset_history_to_database'
 
-        # Check if API keys are configured
-        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
-            return Response(
-                {
-                    'error': 'Binance API keys not configured',
-                    'message': 'Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables in .env file'
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
-            )
+    def get_sync_params(self, request):
+        """Extract parameters for asset history sync."""
+        from datetime import datetime, timedelta
 
-        # Get parameters
         full_sync = request.GET.get('full_sync', 'false').lower() == 'true'
 
-        try:
-            # Initialize analyzer
-            analyzer = TradingPerformanceAnalyzer()
+        # Determine sync start date
+        since = None
+        if full_sync:
+            since = datetime.now() - timedelta(days=365)
 
-            # Determine sync start date
-            since = None
-            if full_sync:
-                from datetime import datetime, timedelta
-                since = datetime.now() - timedelta(days=365)
-                logger.info(f"Full asset history sync requested: fetching since {since}")
-
-            # Sync asset history to database
-            logger.info("Starting asset history synchronization")
-            sync_result = analyzer.sync_asset_history_to_database(since=since)
-
-            logger.info(f"Asset history sync complete: {sync_result}")
-
-            return Response({
-                'status': 'success',
-                'sync_type': 'full' if full_sync else 'incremental',
-                **sync_result
-            })
-
-        except ValueError as e:
-            return Response(
-                {
-                    'error': 'Configuration error',
-                    'message': str(e)
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
-            )
-        except Exception as e:
-            logger.error(f"Error syncing asset history: {e}", exc_info=True)
-            return Response(
-                {
-                    'error': 'Error syncing asset history',
-                    'message': str(e)
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        return {'since': since}
 
 
-class SyncOpenOrdersView(APIView):
+class SyncOpenOrdersView(BinanceSyncBaseView):
     """
     API endpoint to synchronize currently open orders from Binance.
 
@@ -973,51 +764,12 @@ class SyncOpenOrdersView(APIView):
         - Read-only API permissions
     """
 
-    def get(self, request):
-        from django.conf import settings
+    sync_method_name = 'sync_open_orders_to_database'
 
-        # Check if API keys are configured
-        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
-            return Response(
-                {
-                    'error': 'Binance API keys not configured',
-                    'message': 'Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables in .env file'
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
-            )
-
-        # Get parameters
+    def get_sync_params(self, request):
+        """Extract parameters for open orders sync."""
         symbol = request.GET.get('symbol', 'BTC/EUR')
-
-        try:
-            # Initialize analyzer
-            analyzer = TradingPerformanceAnalyzer()
-
-            # Sync open orders
-            logger.info(f"Syncing open orders for {symbol}")
-            sync_result = analyzer.sync_open_orders_to_database(symbol=symbol)
-
-            logger.info(f"Open orders sync complete: {sync_result}")
-
-            return Response(sync_result)
-
-        except ValueError as e:
-            return Response(
-                {
-                    'error': 'Configuration error',
-                    'message': str(e)
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
-            )
-        except Exception as e:
-            logger.error(f"Error syncing open orders: {e}", exc_info=True)
-            return Response(
-                {
-                    'error': 'Error syncing open orders',
-                    'message': str(e)
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        return {'symbol': symbol}
 
 
 class AccountBalanceView(APIView):
@@ -1042,19 +794,8 @@ class AccountBalanceView(APIView):
         - Read-only API permissions
     """
 
+    @require_binance_api_keys
     def get(self, request):
-        from django.conf import settings
-
-        # Check if API keys are configured
-        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
-            return Response(
-                {
-                    'error': 'Binance API keys not configured',
-                    'message': 'Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables in .env file'
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
-            )
-
         try:
             # Initialize analyzer
             analyzer = TradingPerformanceAnalyzer()
@@ -1065,24 +806,20 @@ class AccountBalanceView(APIView):
 
             logger.info(f"Account balances retrieved: {balances}")
 
-            return Response(balances)
+            return success_response(balances)
 
         except ValueError as e:
-            return Response(
-                {
-                    'error': 'Configuration error',
-                    'message': str(e)
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            return error_response(
+                'Configuration error',
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                message=str(e)
             )
         except Exception as e:
             logger.error(f"Error fetching account balances: {e}", exc_info=True)
-            return Response(
-                {
-                    'error': 'Error fetching account balances',
-                    'message': str(e)
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            return error_response(
+                'Error fetching account balances',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                message=str(e)
             )
 
 
@@ -1377,37 +1114,108 @@ class BalanceHistoryView(APIView):
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
-                # Calculate date range
+                # Calculate date range for DISPLAY (last N days)
                 end_date = datetime.now().date()
-                start_date = end_date - timedelta(days=days)
+                display_start_date = end_date - timedelta(days=days)
 
-                # Initialize daily balance tracking
+                # Find earliest transaction to calculate from the BEGINNING
+                cursor.execute("""
+                    SELECT MIN(date(datetime)) as earliest_date
+                    FROM (
+                        SELECT datetime FROM asset_transactions
+                        UNION ALL
+                        SELECT datetime FROM btc_eur_trades
+                    )
+                """)
+                result = cursor.fetchone()
+                earliest_date_str = result['earliest_date']
+
+                if not earliest_date_str:
+                    # No transactions found
+                    return Response({
+                        'dates': [],
+                        'eur_balance': [],
+                        'btc_balance': [],
+                        'bnb_balance': [],
+                        'btc_value_eur': [],
+                        'bnb_value_eur': [],
+                        'total_value_eur': [],
+                        'flows': {},
+                        'current_locked': {}
+                    })
+
+                earliest_date = datetime.strptime(earliest_date_str, '%Y-%m-%d').date()
+                logger.info(f"Calculating balance history from {earliest_date} (earliest transaction) to {end_date}")
+
+                # Initialize daily balance tracking for ALL days since first transaction
                 daily_deltas = defaultdict(lambda: {'eur': 0, 'btc': 0, 'bnb': 0})
 
-                # 1. Get asset transactions (deposits, withdrawals)
+                # 1. Get ALL asset transactions since beginning
+                # Handle converts specially: they affect TWO currencies (from and to)
                 cursor.execute("""
                     SELECT
                         date(datetime) as date,
+                        transaction_type,
                         currency,
-                        SUM(CASE WHEN transaction_type IN ('deposit', 'transfer') THEN amount ELSE -amount END) as net_amount
+                        amount,
+                        from_currency,
+                        from_amount
                     FROM asset_transactions
-                    WHERE date(datetime) >= ?
-                    GROUP BY date(datetime), currency
-                """, (start_date.isoformat(),))
+                """)
 
                 for row in cursor.fetchall():
                     date = row['date']
-                    currency = row['currency'].upper()
-                    amount = float(row['net_amount'])
+                    tx_type = row['transaction_type']
 
-                    if currency == 'EUR':
-                        daily_deltas[date]['eur'] += amount
-                    elif currency == 'BTC':
-                        daily_deltas[date]['btc'] += amount
-                    elif currency == 'BNB':
-                        daily_deltas[date]['bnb'] += amount
+                    # Handle different transaction types
+                    if tx_type == 'convert':
+                        # Convert: Add to target currency, subtract from source currency
+                        to_currency = row['currency'].upper() if row['currency'] else None
+                        to_amount = float(row['amount']) if row['amount'] else 0
+                        from_currency = row['from_currency'].upper() if row['from_currency'] else None
+                        from_amount = float(row['from_amount']) if row['from_amount'] else 0
 
-                # 2. Get trades (BTC buys/sells affect EUR and BTC)
+                        # Add received amount to target currency
+                        if to_currency == 'EUR':
+                            daily_deltas[date]['eur'] += to_amount
+                        elif to_currency == 'BTC':
+                            daily_deltas[date]['btc'] += to_amount
+                        elif to_currency == 'BNB':
+                            daily_deltas[date]['bnb'] += to_amount
+
+                        # Subtract spent amount from source currency
+                        if from_currency == 'EUR':
+                            daily_deltas[date]['eur'] -= from_amount
+                        elif from_currency == 'BTC':
+                            daily_deltas[date]['btc'] -= from_amount
+                        elif from_currency == 'BNB':
+                            daily_deltas[date]['bnb'] -= from_amount
+
+                    elif tx_type in ('deposit', 'transfer'):
+                        # Deposits and transfers: Add to balance
+                        currency = row['currency'].upper() if row['currency'] else None
+                        amount = float(row['amount']) if row['amount'] else 0
+
+                        if currency == 'EUR':
+                            daily_deltas[date]['eur'] += amount
+                        elif currency == 'BTC':
+                            daily_deltas[date]['btc'] += amount
+                        elif currency == 'BNB':
+                            daily_deltas[date]['bnb'] += amount
+
+                    elif tx_type == 'withdrawal':
+                        # Withdrawals: Subtract from balance
+                        currency = row['currency'].upper() if row['currency'] else None
+                        amount = float(row['amount']) if row['amount'] else 0
+
+                        if currency == 'EUR':
+                            daily_deltas[date]['eur'] -= amount
+                        elif currency == 'BTC':
+                            daily_deltas[date]['btc'] -= amount
+                        elif currency == 'BNB':
+                            daily_deltas[date]['bnb'] -= amount
+
+                # 2. Get ALL trades (BTC buys/sells affect EUR and BTC) since beginning
                 cursor.execute("""
                     SELECT
                         date(datetime) as date,
@@ -1415,9 +1223,8 @@ class BalanceHistoryView(APIView):
                         SUM(CASE WHEN side = 'buy' THEN -cost ELSE cost END) as eur_delta,
                         SUM(CASE WHEN fee_currency = 'BNB' THEN -fee_cost ELSE 0 END) as bnb_fees
                     FROM btc_eur_trades
-                    WHERE date(datetime) >= ?
                     GROUP BY date(datetime)
-                """, (start_date.isoformat(),))
+                """)
 
                 for row in cursor.fetchall():
                     date = row['date']
@@ -1425,26 +1232,29 @@ class BalanceHistoryView(APIView):
                     daily_deltas[date]['eur'] += float(row['eur_delta'] or 0)
                     daily_deltas[date]['bnb'] += float(row['bnb_fees'] or 0)
 
-                # 3. Build cumulative daily balances
-                dates = []
-                eur_balance = []
-                btc_balance = []
-                bnb_balance = []
-                btc_value_eur = []
-                bnb_value_eur = []
-                total_value_eur = []
+                # 3. Build cumulative daily balances FORWARD from the beginning
+                # This is the CORRECT approach: start from 0 at first transaction,
+                # add deltas day by day, then only return the last N days
 
-                # Start with initial balances (0 or fetch from earliest known state)
+                all_dates = []
+                all_eur_balance = []
+                all_btc_balance = []
+                all_bnb_balance = []
+                all_btc_value_eur = []
+                all_bnb_value_eur = []
+                all_total_value_eur = []
+
+                # Start from 0 at the earliest date
                 cumulative_eur = 0
                 cumulative_btc = 0
                 cumulative_bnb = 0
 
-                # Generate daily data points
-                current_date = start_date
+                # Go through EACH day from earliest to today
+                current_date = earliest_date
                 while current_date <= end_date:
                     date_str = current_date.isoformat()
 
-                    # Apply deltas for this day
+                    # Apply deltas for this day (transactions that happened today)
                     if date_str in daily_deltas:
                         cumulative_eur += daily_deltas[date_str]['eur']
                         cumulative_btc += daily_deltas[date_str]['btc']
@@ -1455,16 +1265,39 @@ class BalanceHistoryView(APIView):
                     bnb_eur_value = cumulative_bnb * bnb_eur_price
                     total_eur = cumulative_eur + btc_eur_value + bnb_eur_value
 
-                    # Store data points
-                    dates.append(date_str)
-                    eur_balance.append(round(cumulative_eur, 2))
-                    btc_balance.append(round(cumulative_btc, 8))
-                    bnb_balance.append(round(cumulative_bnb, 8))
-                    btc_value_eur.append(round(btc_eur_value, 2))
-                    bnb_value_eur.append(round(bnb_eur_value, 2))
-                    total_value_eur.append(round(total_eur, 2))
+                    # Store ALL data points
+                    all_dates.append(date_str)
+                    all_eur_balance.append(round(cumulative_eur, 2))
+                    all_btc_balance.append(round(cumulative_btc, 8))
+                    all_bnb_balance.append(round(cumulative_bnb, 8))
+                    all_btc_value_eur.append(round(btc_eur_value, 2))
+                    all_bnb_value_eur.append(round(bnb_eur_value, 2))
+                    all_total_value_eur.append(round(total_eur, 2))
 
                     current_date += timedelta(days=1)
+
+                # Now filter to only return the last N days for display
+                # Find the index where display should start
+                display_start_idx = 0
+                for i, date_str in enumerate(all_dates):
+                    if datetime.strptime(date_str, '%Y-%m-%d').date() >= display_start_date:
+                        display_start_idx = i
+                        break
+
+                # Extract only the display range
+                dates = all_dates[display_start_idx:]
+                eur_balance = all_eur_balance[display_start_idx:]
+                btc_balance = all_btc_balance[display_start_idx:]
+                bnb_balance = all_bnb_balance[display_start_idx:]
+                btc_value_eur = all_btc_value_eur[display_start_idx:]
+                bnb_value_eur = all_bnb_value_eur[display_start_idx:]
+                total_value_eur = all_total_value_eur[display_start_idx:]
+
+                # Log the final balance and compare with Binance
+                current_balances = analyzer.get_account_balances()
+                logger.info(f"Calculated final balance: EUR={cumulative_eur:.2f}, BTC={cumulative_btc:.8f}, BNB={cumulative_bnb:.8f}")
+                logger.info(f"Binance current balance: EUR={current_balances['EUR']['total']:.2f}, BTC={current_balances['BTC']['total']:.8f}, BNB={current_balances['BNB']['total']:.8f}")
+                logger.info(f"Difference: EUR={abs(cumulative_eur - current_balances['EUR']['total']):.2f}, BTC={abs(cumulative_btc - current_balances['BTC']['total']):.8f}, BNB={abs(cumulative_bnb - current_balances['BNB']['total']):.8f}")
 
                 logger.info(f"Balance history: {len(dates)} days, total EUR: {total_value_eur[-1] if total_value_eur else 0:.2f}")
 
@@ -1485,7 +1318,7 @@ class BalanceHistoryView(APIView):
                     WHERE transaction_type = 'deposit'
                       AND currency = 'EUR'
                       AND date(datetime) >= ?
-                """, (start_date.isoformat(),))
+                """, (display_start_date.isoformat(),))
                 result = cursor.fetchone()
                 flows['deposits_to_eur'] = round(float(result['total'] or 0), 2)
 
@@ -1495,7 +1328,7 @@ class BalanceHistoryView(APIView):
                     FROM btc_eur_trades
                     WHERE side = 'buy'
                       AND date(datetime) >= ?
-                """, (start_date.isoformat(),))
+                """, (display_start_date.isoformat(),))
                 result = cursor.fetchone()
                 flows['eur_to_btc'] = round(float(result['total'] or 0), 2)
 
@@ -1505,7 +1338,7 @@ class BalanceHistoryView(APIView):
                     FROM btc_eur_trades
                     WHERE side = 'sell'
                       AND date(datetime) >= ?
-                """, (start_date.isoformat(),))
+                """, (display_start_date.isoformat(),))
                 result = cursor.fetchone()
                 flows['btc_to_eur'] = round(float(result['total'] or 0), 2)
 
@@ -1515,7 +1348,7 @@ class BalanceHistoryView(APIView):
                     FROM btc_eur_trades
                     WHERE fee_currency = 'BNB'
                       AND date(datetime) >= ?
-                """, (start_date.isoformat(),))
+                """, (display_start_date.isoformat(),))
                 result = cursor.fetchone()
                 bnb_fees_bnb = float(result['total'] or 0)
                 flows['bnb_to_fees'] = round(bnb_fees_bnb * bnb_eur_price, 2)
@@ -1528,7 +1361,7 @@ class BalanceHistoryView(APIView):
                       AND from_currency = 'EUR'
                       AND to_currency = 'BNB'
                       AND date(datetime) >= ?
-                """, (start_date.isoformat(),))
+                """, (display_start_date.isoformat(),))
                 result = cursor.fetchone()
                 flows['eur_to_bnb'] = round(float(result['total'] or 0), 2)
 
@@ -1539,7 +1372,7 @@ class BalanceHistoryView(APIView):
                     WHERE transaction_type = 'withdrawal'
                       AND currency = 'EUR'
                       AND date(datetime) >= ?
-                """, (start_date.isoformat(),))
+                """, (display_start_date.isoformat(),))
                 result = cursor.fetchone()
                 flows['eur_to_withdrawals'] = round(float(result['total'] or 0), 2)
 
@@ -1593,3 +1426,48 @@ class BalanceHistoryView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class AutoUpdateStatusView(APIView):
+    """
+    GET /api/auto-update-status/
+
+    Returns the status of the auto-update scheduler.
+
+    Returns:
+        JSON with scheduler status, job information, and last update times
+    """
+
+    def get(self, request):
+        from django.conf import settings
+        from .scheduler import get_scheduler_status
+        from .data_updater import get_data_update_service
+
+        # Check if auto-updates are enabled
+        if not settings.AUTO_UPDATE_ENABLED:
+            return Response({
+                'enabled': False,
+                'message': 'Auto-updates are disabled. Set AUTO_UPDATE_ENABLED=True in .env to enable.'
+            })
+
+        # Get scheduler status
+        scheduler_status = get_scheduler_status()
+
+        # Get update statistics
+        service = get_data_update_service()
+        stats = service.get_update_stats()
+
+        return Response({
+            'enabled': True,
+            'scheduler': scheduler_status,
+            'last_updates': stats,
+            'configuration': {
+                'timeframes': settings.AUTO_UPDATE_TIMEFRAMES,
+                'intervals': {
+                    '15m': f"{settings.AUTO_UPDATE_15M_INTERVAL} minutes",
+                    '1h': f"{settings.AUTO_UPDATE_1H_INTERVAL} minutes",
+                    '4h': f"{settings.AUTO_UPDATE_4H_INTERVAL} minutes",
+                    '1d': f"{settings.AUTO_UPDATE_1D_INTERVAL} minutes"
+                }
+            }
+        })

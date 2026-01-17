@@ -65,24 +65,20 @@
             </div>
 
             <div class="control-group">
-                <button id="refresh-btn" class="btn-primary">Aktualisieren</button>
-                <button id="auto-refresh-toggle" class="btn-secondary">Auto-Refresh: AUS</button>
-                <button id="update-db-btn" class="btn-warning" style="background: #ff9800;">📥 Daten von Binance laden</button>
+                <button id="update-db-btn" class="btn-warning" style="background: #ff9800;">📥 Daten aktualisieren</button>
+                <span id="auto-update-status" style="margin-left: 15px; padding: 8px 12px; background: rgba(255,255,255,0.05); border-radius: 4px; font-size: 0.9em;">
+                    <span id="auto-update-indicator">⏱️</span>
+                    <span id="auto-update-text">Prüfe Status...</span>
+                </span>
+                <span style="margin-left: 15px; color: #888; font-size: 0.85em;">
+                    💡 Chart aktualisiert sich automatisch
+                </span>
             </div>
 
             <!-- Engulfing Patterns -->
             <div class="control-group">
                 <label>Candlestick Patterns:</label>
                 <button id="engulfing-toggle" class="btn-secondary" onclick="toggleEngulfing()">🔄 Engulfing: AUS</button>
-            </div>
-
-            <!-- Trend Analysis (Smart Money Concepts) -->
-            <div class="control-group">
-                <label>Trend Analysis (HH/HL):</label>
-                <button id="trend-toggle" class="btn-secondary" onclick="toggleTrend()">📈 Trend: AUS</button>
-                <small style="display: block; color: #888; margin-top: 4px;">
-                    Higher Highs/Higher Lows (Smart Money Concepts)
-                </small>
             </div>
 
             <!-- Day Analysis Mode -->
@@ -102,7 +98,6 @@
                 <p>Lade Chart-Daten...</p>
             </div>
             <div id="chart-container"></div>
-            <div id="volume-container"></div>
         </div>
 
         <!-- Chart Info -->
@@ -123,6 +118,7 @@
     </div>
 
     <!-- Custom JavaScript -->
+    <script src="{% static 'charts/js/utils.js' %}"></script>
     <script src="{% static 'charts/js/api.js' %}"></script>
     <script src="{% static 'charts/js/indicators.js' %}"></script>
     <script src="{% static 'charts/js/chart.js' %}"></script>

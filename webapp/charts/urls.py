@@ -17,7 +17,6 @@ urlpatterns = [
     path('api/ohlcv/<str:timeframe>/', views.OHLCVDataView.as_view(), name='ohlcv'),
     path('api/latest-price/<str:timeframe>/', views.LatestPriceView.as_view(), name='latest-price'),
     path('api/indicators/<str:timeframe>/', views.IndicatorsView.as_view(), name='indicators'),
-    path('api/trend/<str:timeframe>/', views.TrendView.as_view(), name='trend'),
     path('api/engulfing/<str:timeframe>/', views.EngulfingPatternsView.as_view(), name='engulfing'),
     path('api/summary/', views.DataSummaryView.as_view(), name='summary'),
     path('api/update-database/', views.UpdateDatabaseView.as_view(), name='update-database'),
@@ -28,4 +27,5 @@ urlpatterns = [
     path('api/account-balance/', views.AccountBalanceView.as_view(), name='account-balance'),
     path('api/cashflow/', views.CashflowView.as_view(), name='cashflow'),
     path('api/balance-history/', views.BalanceHistoryView.as_view(), name='balance-history'),
+    path('api/auto-update-status/', views.AutoUpdateStatusView.as_view(), name='auto-update-status'),
 ]

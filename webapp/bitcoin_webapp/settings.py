@@ -93,8 +93,11 @@ DATABASES = {
         # CRITICAL: Point to existing database in parent directory
         'NAME': Path(os.getenv('BTC_DB_PATH', str(BASE_DIR.parent / 'btc_eur_data.db'))),
         'OPTIONS': {
-            'timeout': 20,  # Increase timeout for busy database
+            'timeout': 30,  # Increase timeout for busy database (auto-updates)
             'check_same_thread': False,  # Allow multi-threaded access (required for SQLite in production)
+            # Enable Write-Ahead Logging for concurrent reads during writes
+            # This allows API requests to read while background scheduler writes
+            'init_command': 'PRAGMA journal_mode=WAL;',
         },
         # Connection pooling: Keep connections alive for reuse
         # In development (DEBUG=True), close connections after each request (CONN_MAX_AGE=0)
@@ -192,3 +195,78 @@ if not BINANCE_API_KEY or not BINANCE_API_SECRET:
         "Set BINANCE_API_KEY and BINANCE_API_SECRET environment variables.",
         RuntimeWarning
     )
+
+
+# ==================== AUTO-UPDATE SCHEDULER CONFIGURATION ====================
+# Background automatic database updates using APScheduler
+
+# Enable/disable automatic updates
+AUTO_UPDATE_ENABLED = os.getenv('AUTO_UPDATE_ENABLED', 'False') == 'True'
+
+# Update intervals (in minutes) for each timeframe
+AUTO_UPDATE_15M_INTERVAL = int(os.getenv('AUTO_UPDATE_15M_INTERVAL', '5'))  # 5 minutes
+AUTO_UPDATE_1H_INTERVAL = int(os.getenv('AUTO_UPDATE_1H_INTERVAL', '30'))   # 30 minutes
+AUTO_UPDATE_4H_INTERVAL = int(os.getenv('AUTO_UPDATE_4H_INTERVAL', '120'))  # 2 hours
+AUTO_UPDATE_1D_INTERVAL = int(os.getenv('AUTO_UPDATE_1D_INTERVAL', '360'))  # 6 hours
+
+# Which timeframes to auto-update (comma-separated: 15m,1h,4h,1d)
+AUTO_UPDATE_TIMEFRAMES = os.getenv('AUTO_UPDATE_TIMEFRAMES', '15m').split(',')
+
+# Maximum execution time per update job (seconds)
+AUTO_UPDATE_TIMEOUT = int(os.getenv('AUTO_UPDATE_TIMEOUT', '60'))
+
+# Warn if auto-updates are enabled (informational)
+if AUTO_UPDATE_ENABLED:
+    import warnings
+    warnings.warn(
+        f"Auto-update scheduler ENABLED: {', '.join(AUTO_UPDATE_TIMEFRAMES)} "
+        f"(15m every {AUTO_UPDATE_15M_INTERVAL}min)",
+        RuntimeWarning
+    )
+
+
+# ==================== LOGGING CONFIGURATION ====================
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': BASE_DIR.parent / 'bitcoin_data.log',
+            'maxBytes': 10485760,  # 10MB
+            'backupCount': 5,
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'charts.scheduler': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'charts.data_updater': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'apscheduler': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING',  # Only log warnings/errors from APScheduler
+            'propagate': False,
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+}

@@ -2,6 +2,7 @@
  * API Interaction Layer for Bitcoin Trading Dashboard
  *
  * Provides async functions for fetching data from Django REST API endpoints.
+ * Uses shared fetchJSON wrapper from utils.js to eliminate code duplication.
  */
 
 const API = {
@@ -15,20 +16,8 @@ const API = {
      * @returns {Promise<Object>} OHLCV data response
      */
     async fetchOHLCV(timeframe, limit = 500) {
-        const url = `/api/ohlcv/${timeframe}/?limit=${limit}`;
-
-        try {
-            const response = await fetch(url);
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error(`Error fetching OHLCV data for ${timeframe}:`, error);
-            throw error;
-        }
+        const url = buildUrl(`/api/ohlcv/${timeframe}/`, { limit });
+        return fetchJSON(url);
     },
 
     /**
@@ -39,19 +28,7 @@ const API = {
      */
     async fetchLatestPrice(timeframe) {
         const url = `/api/latest-price/${timeframe}/`;
-
-        try {
-            const response = await fetch(url);
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error(`Error fetching latest price for ${timeframe}:`, error);
-            throw error;
-        }
+        return fetchJSON(url);
     },
 
     /**
@@ -69,20 +46,12 @@ const API = {
             period = indicator === 'rsi' ? 14 : 20;
         }
 
-        const url = `/api/indicators/${timeframe}/?indicator=${indicator}&period=${period}&limit=${limit}`;
-
-        try {
-            const response = await fetch(url);
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error(`Error fetching ${indicator} indicator for ${timeframe}:`, error);
-            throw error;
-        }
+        const url = buildUrl(`/api/indicators/${timeframe}/`, {
+            indicator,
+            period,
+            limit
+        });
+        return fetchJSON(url);
     },
 
     /**
@@ -91,19 +60,15 @@ const API = {
      * @returns {Promise<Object>} Summary statistics
      */
     async fetchSummary() {
-        const url = `/api/summary/`;
+        return fetchJSON('/api/summary/');
+    },
 
-        try {
-            const response = await fetch(url);
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Error fetching database summary:', error);
-            throw error;
-        }
+    /**
+     * Fetch auto-update scheduler status
+     *
+     * @returns {Promise<Object>} Scheduler status with next run times
+     */
+    async fetchAutoUpdateStatus() {
+        return fetchJSON('/api/auto-update-status/');
     }
 };
