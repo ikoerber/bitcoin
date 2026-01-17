@@ -105,6 +105,157 @@ class DataUpdateService:
             # Always release the lock
             update_locks[timeframe].release()
 
+    def update_order_blocks(self, timeframe: str = '1h') -> dict:
+        """
+        Calculate and update Order Blocks for specified timeframe.
+
+        This method:
+        1. Fetches recent OHLCV data from database
+        2. Runs Order Block analysis using orderblock_analytics.py
+        3. Upserts Order Blocks to database (creates new, updates existing)
+        4. Returns statistics about the update
+
+        Args:
+            timeframe: Timeframe to analyze (default: '1h')
+
+        Returns:
+            Dictionary with update statistics:
+            - timeframe: str
+            - status: 'success' or 'error'
+            - created: number of new Order Blocks
+            - updated: number of updated Order Blocks
+            - duration: processing time in seconds
+            - timestamp: ISO format timestamp
+        """
+        start_time = datetime.now()
+        logger.info(f"Starting Order Block calculation for {timeframe}")
+
+        try:
+            from django.conf import settings
+            from .models import TIMEFRAME_MODELS, OrderBlock1h
+            from .orderblock_analytics import OrderBlockAnalyzer
+            import pandas as pd
+
+            # Get database path
+            db_path = settings.DATABASES['default']['NAME']
+
+            # Fetch OHLCV data (need 500 candles for reliable analysis)
+            model = TIMEFRAME_MODELS.get(timeframe)
+            if not model:
+                return {
+                    'timeframe': timeframe,
+                    'status': 'error',
+                    'error': f'Invalid timeframe: {timeframe}',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            # Query latest 500 candles
+            queryset = model.objects.order_by('-timestamp')[:500]
+
+            if not queryset.exists():
+                logger.warning(f"No OHLCV data available for {timeframe}")
+                return {
+                    'timeframe': timeframe,
+                    'status': 'error',
+                    'error': 'No OHLCV data available',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            # Convert to DataFrame (reverse to chronological order)
+            data = list(queryset.values('timestamp', 'open', 'high', 'low', 'close', 'volume'))
+            data.reverse()
+            df = pd.DataFrame(data)
+
+            logger.info(f"Loaded {len(df)} candles for Order Block analysis")
+
+            # Initialize analyzer with configuration
+            # TODO: Get these from constants.py or settings
+            analyzer = OrderBlockAnalyzer(
+                atr_period=14,
+                atr_multiplier=1.2,
+                swing_window=3,
+                zone_mode='conservative',
+                min_candles=200
+            )
+
+            # Run analysis
+            order_blocks = analyzer.analyze(df)
+
+            if not order_blocks:
+                logger.info("No Order Blocks detected")
+                return {
+                    'timeframe': timeframe,
+                    'status': 'success',
+                    'created': 0,
+                    'updated': 0,
+                    'duration': (datetime.now() - start_time).total_seconds(),
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            # Upsert Order Blocks to database
+            created_count = 0
+            updated_count = 0
+
+            for ob in order_blocks:
+                # Check if Order Block already exists
+                existing = OrderBlock1h.objects.filter(
+                    symbol='BTC/EUR',
+                    direction=ob['direction'],
+                    created_ts_ms=ob['created_ts_ms']
+                ).first()
+
+                if existing:
+                    # Update status if changed
+                    if existing.status != ob['status']:
+                        existing.status = ob['status']
+                        existing.valid_to_ts_ms = ob['valid_to_ts_ms']
+                        existing.save()
+                        updated_count += 1
+                else:
+                    # Create new Order Block
+                    OrderBlock1h.objects.create(
+                        symbol='BTC/EUR',
+                        direction=ob['direction'],
+                        created_ts_ms=ob['created_ts_ms'],
+                        valid_from_ts_ms=ob['valid_from_ts_ms'],
+                        valid_to_ts_ms=ob['valid_to_ts_ms'],
+                        price_low=ob['price_low'],
+                        price_high=ob['price_high'],
+                        atr14=ob['atr14'],
+                        bos_level=ob['bos_level'],
+                        displacement_range=ob['displacement_range'],
+                        status=ob['status']
+                    )
+                    created_count += 1
+
+            duration = (datetime.now() - start_time).total_seconds()
+
+            result = {
+                'timeframe': timeframe,
+                'status': 'success',
+                'created': created_count,
+                'updated': updated_count,
+                'total': len(order_blocks),
+                'duration': duration,
+                'timestamp': datetime.now().isoformat()
+            }
+
+            logger.info(
+                f"Order Block update completed: {created_count} created, "
+                f"{updated_count} updated in {duration:.2f}s"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error updating Order Blocks: {e}", exc_info=True)
+            return {
+                'timeframe': timeframe,
+                'status': 'error',
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+
     def get_last_update_time(self, timeframe: str):
         """Get the last successful update time for a timeframe."""
         return self.last_update_times.get(timeframe)

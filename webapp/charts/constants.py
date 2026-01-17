@@ -255,3 +255,37 @@ ERROR_API_ERROR = 'API error: {error}'
 SUCCESS_DATA_UPDATED = 'Data updated successfully'
 SUCCESS_SYNC_COMPLETE = 'Synchronization completed successfully'
 SUCCESS_QUERY_COMPLETE = 'Query completed successfully'
+
+
+# ============================================================================
+# ORDER BLOCK CONFIGURATION (Smart Money Concepts)
+# ============================================================================
+
+# ATR Configuration
+OB_ATR_PERIOD = 14                   # Period for ATR calculation
+OB_ATR_MULTIPLIER = 1.2              # Displacement threshold (k × ATR)
+
+# Swing Detection Configuration
+OB_SWING_WINDOW = 3                  # Fractal window size for swing points (N=3)
+
+# Zone Definition Mode
+OB_ZONE_MODE = 'conservative'        # 'conservative' (Open-Low/High-Open) or 'aggressive' (High-Low)
+
+# Analysis Requirements
+OB_MIN_CANDLES = 200                 # Minimum candles required for reliable analysis
+
+# Display Configuration
+OB_RENDER_TOUCHED = True             # Render touched/mitigated Order Blocks
+OB_MAX_DISPLAY = 200                 # Maximum Order Blocks to display on chart
+
+# Color Scheme (TradingView compatible)
+OB_COLOR_BULLISH_FRESH = '#00e67633'     # Green with transparency (fresh demand zone)
+OB_COLOR_BULLISH_TOUCHED = '#00e67619'   # Light green (touched demand zone)
+OB_COLOR_BEARISH_FRESH = '#ff408133'     # Red with transparency (fresh supply zone)
+OB_COLOR_BEARISH_TOUCHED = '#ff408119'   # Light red (touched supply zone)
+
+# Border Colors
+OB_BORDER_BULLISH = '#00e676'        # Green border for bullish OB
+OB_BORDER_BULLISH_FADED = '#00e67660'  # Faded green for touched bullish OB
+OB_BORDER_BEARISH = '#ff4081'        # Red border for bearish OB
+OB_BORDER_BEARISH_FADED = '#ff408160'  # Faded red for touched bearish OB

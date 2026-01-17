@@ -84,9 +84,22 @@ def start_scheduler():
             f"(job ID: update_{timeframe})"
         )
 
+    # Add Order Blocks calculation job (runs hourly after 1h OHLCV update)
+    scheduler.add_job(
+        func=service.update_order_blocks,
+        trigger=IntervalTrigger(minutes=60),
+        args=['1h'],
+        id='update_orderblocks_1h',
+        name='Update Order Blocks (1h)',
+        replace_existing=True,
+        misfire_grace_time=300  # Allow 5min grace period for missed executions
+    )
+
+    logger.info("Scheduled Order Blocks updates every 60 minutes (job ID: update_orderblocks_1h)")
+
     # Start the scheduler
     scheduler.start()
-    logger.info(f"Auto-update scheduler started with {len(enabled_timeframes)} jobs")
+    logger.info(f"Auto-update scheduler started with {len(enabled_timeframes) + 1} jobs (OHLCV + Order Blocks)")
 
 
 def stop_scheduler():

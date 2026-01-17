@@ -28,4 +28,5 @@ urlpatterns = [
     path('api/cashflow/', views.CashflowView.as_view(), name='cashflow'),
     path('api/balance-history/', views.BalanceHistoryView.as_view(), name='balance-history'),
     path('api/auto-update-status/', views.AutoUpdateStatusView.as_view(), name='auto-update-status'),
+    path('api/order-blocks/<str:timeframe>/', views.OrderBlocksView.as_view(), name='order-blocks'),
 ]

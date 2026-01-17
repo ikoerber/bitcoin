@@ -1471,3 +1471,173 @@ class AutoUpdateStatusView(APIView):
                 }
             }
         })
+
+
+class OrderBlocksView(APIView):
+    """
+    GET /api/order-blocks/<timeframe>/
+
+    Returns Order Blocks for TradingView visualization.
+
+    Order Blocks are institutional supply/demand zones detected using
+    Smart Money Concepts (SMC) methodology with ATR-based displacement
+    and Break of Structure (BOS) confirmation.
+
+    Query Parameters:
+        status: fresh|touched|invalid|all (default: all)
+        direction: bullish|bearish|all (default: all)
+        limit: max results (default: 100, max: 500)
+        start_date: YYYY-MM-DD (optional)
+        end_date: YYYY-MM-DD (optional)
+
+    Returns:
+        JSON with Order Blocks in TradingView-compatible format:
+        {
+            "timeframe": "1h",
+            "count": 15,
+            "order_blocks": [
+                {
+                    "id": 123,
+                    "direction": "bullish",
+                    "time_start": 1640000000,
+                    "time_end": 1640100000,
+                    "price_low": 45000.0,
+                    "price_high": 45200.0,
+                    "status": "fresh",
+                    "atr14": 850.5,
+                    "bos_level": 46000.0,
+                    "displacement_range": 1200.0,
+                    "zone_size": 200.0,
+                    "color": "#00e67633",
+                    "border_color": "#00e676"
+                },
+                ...
+            ]
+        }
+    """
+
+    def get(self, request, timeframe):
+        from .models import OrderBlock1h
+
+        # Validate timeframe (only 1h supported for now)
+        if timeframe != '1h':
+            return Response(
+                {'error': f'Invalid timeframe: {timeframe}. Only "1h" is supported for Order Blocks.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get query parameters
+        status_filter = request.GET.get('status', 'all')
+        direction_filter = request.GET.get('direction', 'all')
+
+        try:
+            limit = int(request.GET.get('limit', 100))
+            if limit <= 0:
+                return Response(
+                    {'error': 'Limit must be a positive integer'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            limit = min(limit, 500)  # Cap at 500
+        except ValueError:
+            return Response(
+                {'error': 'Invalid limit parameter. Must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        start_date = request.GET.get('start_date')  # YYYY-MM-DD format
+        end_date = request.GET.get('end_date')      # YYYY-MM-DD format
+
+        # Validate date formats
+        date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+        if start_date and not date_pattern.match(start_date):
+            return Response(
+                {'error': 'Invalid start_date format. Use YYYY-MM-DD.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if end_date and not date_pattern.match(end_date):
+            return Response(
+                {'error': 'Invalid end_date format. Use YYYY-MM-DD.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Build query
+        queryset = OrderBlock1h.objects.filter(symbol='BTC/EUR')
+
+        # Filter by status
+        if status_filter != 'all':
+            if status_filter not in ['fresh', 'touched', 'invalid']:
+                return Response(
+                    {'error': f'Invalid status: {status_filter}. Must be fresh, touched, invalid, or all.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            queryset = queryset.filter(status=status_filter)
+
+        # Filter by direction
+        if direction_filter != 'all':
+            if direction_filter not in ['bullish', 'bearish']:
+                return Response(
+                    {'error': f'Invalid direction: {direction_filter}. Must be bullish, bearish, or all.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            queryset = queryset.filter(direction=direction_filter)
+
+        # Filter by date range (using created_ts_ms)
+        if start_date:
+            from datetime import datetime
+            start_ts = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp() * 1000)
+            queryset = queryset.filter(created_ts_ms__gte=start_ts)
+        if end_date:
+            from datetime import datetime
+            end_ts = int(datetime.strptime(end_date, '%Y-%m-%d').timestamp() * 1000)
+            queryset = queryset.filter(created_ts_ms__lte=end_ts)
+
+        # Order by creation time (newest first) and apply limit
+        queryset = queryset.order_by('-created_ts_ms')[:limit]
+
+        # Serialize for TradingView
+        order_blocks = []
+        for ob in queryset:
+            # Determine color based on direction and status
+            if ob.direction == 'bullish':
+                if ob.status == 'fresh':
+                    color = '#00e67633'  # Green with alpha
+                    border_color = '#00e676'
+                else:  # touched or invalid
+                    color = '#00e67619'  # Light green
+                    border_color = '#00e67660'
+            else:  # bearish
+                if ob.status == 'fresh':
+                    color = '#ff408133'  # Red with alpha
+                    border_color = '#ff4081'
+                else:  # touched or invalid
+                    color = '#ff408119'  # Light red
+                    border_color = '#ff408160'
+
+            order_blocks.append({
+                'id': ob.id,
+                'direction': ob.direction,
+                'time_start': ob.created_ts_ms // 1000,  # Convert to seconds for TradingView
+                'time_end': (ob.valid_to_ts_ms // 1000) if ob.valid_to_ts_ms else None,
+                'price_low': float(ob.price_low),
+                'price_high': float(ob.price_high),
+                'status': ob.status,
+                'atr14': float(ob.atr14),
+                'bos_level': float(ob.bos_level),
+                'displacement_range': float(ob.displacement_range),
+                'zone_size': ob.zone_size,
+                'color': color,
+                'border_color': border_color,
+                'created_datetime': ob.created_datetime_str
+            })
+
+        return Response({
+            'timeframe': timeframe,
+            'count': len(order_blocks),
+            'order_blocks': order_blocks,
+            'filters': {
+                'status': status_filter,
+                'direction': direction_filter,
+                'start_date': start_date,
+                'end_date': end_date
+            }
+        })

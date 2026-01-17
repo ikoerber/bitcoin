@@ -24,6 +24,10 @@ let previousDayCloseLine = null;  // Previous day close price line
 let limitOrderLines = [];  // Open limit order price lines
 let savedVisibleRange = null;  // Store original visible range before day mode
 
+// Order Blocks visualization
+let orderBlocksEnabled = false;
+let orderBlockLines = [];  // Array to store Order Block price line references
+
 /**
  * Initialize TradingView charts
  */
@@ -1259,6 +1263,155 @@ function updateCountdown() {
     } else {
         textElement.textContent = `Nächstes Update in ${seconds}s`;
     }
+}
+
+/**
+ * Toggle Order Blocks visualization on/off
+ */
+async function toggleOrderBlocks() {
+    orderBlocksEnabled = !orderBlocksEnabled;
+    const button = document.getElementById('toggle-orderblocks');
+
+    if (orderBlocksEnabled) {
+        // Enable Order Blocks
+        button.textContent = '📦 OB 1h: AN';
+        button.classList.add('active');
+
+        // Load and display Order Blocks
+        await loadAndDisplayOrderBlocks();
+    } else {
+        // Disable Order Blocks
+        button.textContent = '📦 OB 1h: AUS';
+        button.classList.remove('active');
+
+        // Clear Order Blocks from chart
+        clearOrderBlocks();
+    }
+}
+
+/**
+ * Load Order Blocks from API and display on chart
+ */
+async function loadAndDisplayOrderBlocks() {
+    if (!chart || !candlestickSeries) {
+        console.warn('Chart not initialized yet');
+        return;
+    }
+
+    try {
+        // Fetch Order Blocks from API (all statuses for visualization)
+        const response = await fetch(`/api/order-blocks/${currentTimeframe}/?status=all&limit=200`);
+
+        if (!response.ok) {
+            console.error('Failed to fetch Order Blocks:', response.statusText);
+            return;
+        }
+
+        const data = await response.json();
+
+        console.log(`Loaded ${data.count} Order Blocks for ${data.timeframe}`);
+
+        // Render Order Blocks on chart
+        renderOrderBlocks(data.order_blocks);
+
+    } catch (error) {
+        console.error('Error loading Order Blocks:', error);
+    }
+}
+
+/**
+ * Render Order Blocks as horizontal price lines (dashed)
+ *
+ * @param {Array} orderBlocks - Array of Order Block objects from API
+ */
+function renderOrderBlocks(orderBlocks) {
+    // Clear existing Order Blocks first
+    clearOrderBlocks();
+
+    if (!orderBlocks || orderBlocks.length === 0) {
+        console.log('No Order Blocks to render');
+        return;
+    }
+
+    // Render each Order Block with border lines and hatched fill
+    orderBlocks.forEach((ob, index) => {
+        // Skip invalid Order Blocks (optional - you can render them with different style)
+        if (ob.status === 'invalid') {
+            return;
+        }
+
+        const lines = [];
+
+        // Bottom line (price_low) - thick border
+        const bottomLine = candlestickSeries.createPriceLine({
+            price: ob.price_low,
+            color: ob.border_color,
+            lineWidth: 4,
+            lineStyle: LightweightCharts.LineStyle.Solid,
+            axisLabelVisible: true,
+            title: `${ob.direction.toUpperCase()} OB (${ob.status})`
+        });
+        lines.push(bottomLine);
+
+        // Top line (price_high) - thick border
+        const topLine = candlestickSeries.createPriceLine({
+            price: ob.price_high,
+            color: ob.border_color,
+            lineWidth: 4,
+            lineStyle: LightweightCharts.LineStyle.Solid,
+            axisLabelVisible: false
+        });
+        lines.push(topLine);
+
+        // Add hatched fill lines between top and bottom
+        const zoneSize = ob.price_high - ob.price_low;
+        const numHatchLines = Math.max(3, Math.min(10, Math.floor(zoneSize / 50))); // 3-10 lines based on zone size
+
+        // Get fill color with transparency
+        const fillColor = ob.color; // Already has transparency (e.g., #00e67633)
+
+        for (let i = 1; i < numHatchLines; i++) {
+            const ratio = i / numHatchLines;
+            const hatchPrice = ob.price_low + (zoneSize * ratio);
+
+            const hatchLine = candlestickSeries.createPriceLine({
+                price: hatchPrice,
+                color: fillColor,
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle.Solid,
+                axisLabelVisible: false
+            });
+            lines.push(hatchLine);
+        }
+
+        // Store all line references for cleanup
+        orderBlockLines.push({ lines: lines, ob: ob });
+    });
+
+    console.log(`Rendered ${orderBlockLines.length} Order Blocks on chart`);
+}
+
+/**
+ * Clear all Order Block price lines from chart
+ */
+function clearOrderBlocks() {
+    if (!candlestickSeries) return;
+
+    // Remove all Order Block price lines (borders and hatched fill)
+    orderBlockLines.forEach(obData => {
+        obData.lines.forEach(line => {
+            try {
+                candlestickSeries.removePriceLine(line);
+            } catch (error) {
+                console.debug('Error removing Order Block line:', error.message);
+            }
+        });
+    });
+
+    // Clear the array
+    orderBlockLines = [];
+
+    console.log('Cleared Order Blocks from chart');
 }
 
 // Initialize auto-update status on page load

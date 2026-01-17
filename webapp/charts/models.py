@@ -469,8 +469,150 @@ class OpenOrder(models.Model):
     
     def __str__(self):
         return f"{self.side.upper()} {self.remaining}/{self.amount} BTC @ €{self.price}"
-    
+
     @property
     def datetime_str(self):
         """Human-readable datetime string"""
         return self.datetime.strftime('%Y-%m-%d %H:%M:%S')
+
+
+class OrderBlock1h(models.Model):
+    """
+    Model for storing Order Blocks detected on 1h timeframe.
+
+    Order Blocks are institutional supply/demand zones identified using
+    Smart Money Concepts (SMC) methodology with ATR-based displacement
+    and Break of Structure (BOS) confirmation.
+
+    Status lifecycle: fresh → touched → invalid
+    """
+
+    # Direction choices
+    DIRECTION_CHOICES = [
+        ('bullish', 'Bullish'),
+        ('bearish', 'Bearish'),
+    ]
+
+    # Status choices
+    STATUS_CHOICES = [
+        ('fresh', 'Fresh'),
+        ('touched', 'Touched'),
+        ('invalid', 'Invalid'),
+    ]
+
+    # Primary key
+    id = models.AutoField(primary_key=True)
+
+    # Order Block metadata
+    symbol = models.CharField(
+        max_length=20,
+        default='BTC/EUR',
+        db_index=True,
+        help_text="Trading pair symbol"
+    )
+
+    direction = models.CharField(
+        max_length=8,
+        choices=DIRECTION_CHOICES,
+        db_index=True,
+        help_text="Bullish (demand) or Bearish (supply)"
+    )
+
+    # Timestamps
+    created_ts_ms = models.BigIntegerField(
+        db_index=True,
+        help_text="Timestamp when Order Block candle formed (milliseconds)"
+    )
+
+    valid_from_ts_ms = models.BigIntegerField(
+        db_index=True,
+        help_text="Timestamp when Order Block became valid"
+    )
+
+    valid_to_ts_ms = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when Order Block was invalidated (null if still valid)"
+    )
+
+    # Price levels
+    price_low = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        help_text="Lower bound of Order Block zone (EUR)"
+    )
+
+    price_high = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        help_text="Upper bound of Order Block zone (EUR)"
+    )
+
+    # Technical indicators
+    atr14 = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        help_text="ATR(14) value at time of formation"
+    )
+
+    bos_level = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        help_text="Break of Structure level that confirmed this Order Block"
+    )
+
+    displacement_range = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        help_text="Range of displacement candle (high - low)"
+    )
+
+    # Status tracking
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default='fresh',
+        db_index=True,
+        help_text="Current status: fresh, touched, or invalid"
+    )
+
+    # Audit timestamps
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this record was created in database"
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="When this record was last updated"
+    )
+
+    class Meta:
+        db_table = 'order_blocks_1h'
+        ordering = ['-created_ts_ms']
+        verbose_name = 'Order Block (1h)'
+        verbose_name_plural = 'Order Blocks (1h)'
+        indexes = [
+            models.Index(fields=['symbol', 'status', '-created_ts_ms'], name='idx_ob_symbol_status_ts'),
+            models.Index(fields=['direction', 'status'], name='idx_ob_direction_status'),
+            models.Index(fields=['valid_from_ts_ms', 'valid_to_ts_ms'], name='idx_ob_valid_time_range'),
+        ]
+
+    def __str__(self):
+        return f"{self.direction.upper()} OB @ €{self.price_low:.2f}-{self.price_high:.2f} ({self.status})"
+
+    @property
+    def zone_size(self) -> float:
+        """Calculate zone size in EUR."""
+        return float(self.price_high - self.price_low)
+
+    @property
+    def is_valid(self) -> bool:
+        """Check if Order Block is still valid (fresh or touched, not invalid)."""
+        return self.status in ['fresh', 'touched']
+
+    @property
+    def created_datetime_str(self):
+        """Human-readable datetime string for creation timestamp."""
+        from datetime import datetime
+        return datetime.fromtimestamp(self.created_ts_ms / 1000).strftime('%Y-%m-%d %H:%M:%S')
